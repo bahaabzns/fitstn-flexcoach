@@ -1,0 +1,638 @@
+{
+  "rooms": [
+    {
+      "id": "f0d312a2-8b27-467b-99bb-d2bd48d00695",
+      "name": "Khaled Salaheldin Mohamed's Room",
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2025-11-30T11:13:31.896+00:00",
+      "updated_at": "2026-03-01T04:39:41.915782+00:00",
+      "last_message_id": "f609995c-689a-40a4-b9e4-a927e79a1dd4",
+      "last_client_message_at": "2026-03-01T04:39:41.915782+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "02ba5a0f-6e0b-40a8-a59e-74ca7d5faa16",
+        "code": 902,
+        "fullname": "Khaled Salaheldin Mohamed",
+        "email": "Eng_khaled_salah@yahoo.com",
+        "gender": "male",
+        "profile_picture_url": "https://firebasestorage.googleapis.com/v0/b/fitch-69506.appspot.com/o/no-pp.png?alt=media&token=74df93c5-cd95-4982-9cfe-5fc2f7f0ce56",
+        "country": "Saudi Arabia",
+        "added_by": "f41a11ad-9da8-4dce-a6f5-66c9c4ded930"
+      },
+      "derived_gender": "Male",
+      "last_message": {
+        "id": "f609995c-689a-40a4-b9e4-a927e79a1dd4",
+        "content": "والله بحاول",
+        "type": "text",
+        "created_at": "2026-03-01T04:39:41.915782+00:00",
+        "sender_staff_id": null,
+        "sender_client_id": "02ba5a0f-6e0b-40a8-a59e-74ca7d5faa16"
+      },
+      "unread_count": 44,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "49774c24-24d1-4dba-a9ce-e65bd3a70e37",
+          "fullname": "Omar Gallab",
+          "profile_picture_url": null,
+          "role": "workoutCoach"
+        },
+        {
+          "id": "59f94c30-fc49-42cb-a464-e83671203a06",
+          "fullname": "Mohamed Tarek",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        },
+        {
+          "id": "a9df35ba-f29d-498a-9d6d-5ce9d7b78862",
+          "fullname": "Manar",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo",
+        "end_date": "2026-06-19"
+      }
+    },
+    {
+      "id": "25c907dc-0e41-4a72-a579-ce04eda2f818",
+      "name": null,
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2026-02-25T18:26:09.057042+00:00",
+      "updated_at": "2026-03-01T04:33:00.765086+00:00",
+      "last_message_id": "6cdca1d7-cdf6-4294-8adb-35df29daa8de",
+      "last_client_message_at": "2026-03-01T04:33:00.765086+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "f59ab76d-604a-410e-9750-041172ae3622",
+        "code": 3196,
+        "fullname": "Loay Sayed Ahmed",
+        "email": "loaysayed908@gmail.com",
+        "gender": "male",
+        "profile_picture_url": "https://sellzy.b-cdn.net/chat_media/1772221783087_image_picker_E25A2D75-A8C3-4597-9C1F-B9D1E8064E18-11373-00000160E85E270E.jpg",
+        "country": "Egypt",
+        "added_by": "1cd22ced-d7cf-49cd-a467-c4047949a26c"
+      },
+      "derived_gender": "male",
+      "last_message": {
+        "id": "6cdca1d7-cdf6-4294-8adb-35df29daa8de",
+        "content": null,
+        "type": "audio",
+        "created_at": "2026-03-01T04:33:00.765086+00:00",
+        "sender_staff_id": null,
+        "sender_client_id": "f59ab76d-604a-410e-9750-041172ae3622"
+      },
+      "unread_count": 63,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "1cd22ced-d7cf-49cd-a467-c4047949a26c",
+          "fullname": "Hadeer Elbanna",
+          "profile_picture_url": null,
+          "role": "Sales teamleader"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": null
+      }
+    },
+    {
+      "id": "d40bce9a-993d-45f2-b1cd-216222b53386",
+      "name": null,
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2026-01-26T20:55:12.51546+00:00",
+      "updated_at": "2026-03-01T04:26:15.277016+00:00",
+      "last_message_id": "483d4459-a6a3-4158-a2f1-d9cdc7a3eec5",
+      "last_client_message_at": "2026-03-01T04:26:15.277016+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "c6f267ea-f113-4d5c-8c6b-70249752f1f8",
+        "code": 2879,
+        "fullname": "Philopateer Ehab filly",
+        "email": "feloehab16@gmail.com",
+        "gender": "male",
+        "profile_picture_url": null,
+        "country": "Egypt",
+        "added_by": "1cd22ced-d7cf-49cd-a467-c4047949a26c"
+      },
+      "derived_gender": "male",
+      "last_message": {
+        "id": "483d4459-a6a3-4158-a2f1-d9cdc7a3eec5",
+        "content": "صباح الخير يا كوتش انا كنت عايز اغير النظام الغذائي عشان انا مسيحي و عندنا صيام الفترة دي",
+        "type": "text",
+        "created_at": "2026-03-01T04:26:15.277016+00:00",
+        "sender_staff_id": null,
+        "sender_client_id": "c6f267ea-f113-4d5c-8c6b-70249752f1f8"
+      },
+      "unread_count": 13,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "1cd22ced-d7cf-49cd-a467-c4047949a26c",
+          "fullname": "Hadeer Elbanna",
+          "profile_picture_url": null,
+          "role": "Sales teamleader"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "38410641-d728-4626-b847-e20348493944",
+          "fullname": "Abdullah Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "59f94c30-fc49-42cb-a464-e83671203a06",
+          "fullname": "Mohamed Tarek",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        },
+        {
+          "id": "a9df35ba-f29d-498a-9d6d-5ce9d7b78862",
+          "fullname": "Manar",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Express",
+        "end_date": null
+      }
+    },
+    {
+      "id": "9491eb27-c60f-4d4a-84c0-2b93fe7e297f",
+      "name": "Jolie adel antone 's Room",
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2025-11-30T02:38:19.886+00:00",
+      "updated_at": "2026-03-01T03:29:45.292687+00:00",
+      "last_message_id": "220cc526-db20-4c0c-9630-52ac82f59212",
+      "last_client_message_at": "2026-03-01T03:29:13.608671+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "fd028228-ec53-45ff-80e8-6dd5666fc77b",
+        "code": 385,
+        "fullname": "Jolie adel antone ",
+        "email": "Joliedemian@gmail.com",
+        "gender": "female",
+        "profile_picture_url": "https://firebasestorage.googleapis.com/v0/b/bassiouny-d2836.firebasestorage.app/o/QoAAMTGYOANEvdCrHYLXbuPN5zy2%2FJPEG_20250809_052639_8063406731235335797.jpg?alt=media&token=672f411f-3367-41a8-9be5-15ef47325905",
+        "country": "Egypt",
+        "added_by": "f41a11ad-9da8-4dce-a6f5-66c9c4ded930"
+      },
+      "derived_gender": "Female",
+      "last_message": {
+        "id": "220cc526-db20-4c0c-9630-52ac82f59212",
+        "content": null,
+        "type": "audio",
+        "created_at": "2026-03-01T03:29:45.292687+00:00",
+        "sender_staff_id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+        "sender_client_id": null
+      },
+      "unread_count": 274,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": "2026-03-23"
+      }
+    },
+    {
+      "id": "df2b9cd3-c897-4390-946f-d7dab1f742a4",
+      "name": "Mohamed Mahmoud Ismail's Room",
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2025-12-10T15:26:41.595+00:00",
+      "updated_at": "2026-03-01T03:21:22.573169+00:00",
+      "last_message_id": "ee4bbe5b-bf83-46e8-8e41-30fd35ecd868",
+      "last_client_message_at": "2026-02-28T22:45:46.407226+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "a616acc9-d056-45f8-b60f-51cb04b6600d",
+        "code": 2175,
+        "fullname": "Mohamed Mahmoud Ismail",
+        "email": "3amismail14@gmail.com",
+        "gender": "male",
+        "profile_picture_url": "https://firebasestorage.googleapis.com/v0/b/fitch-69506.appspot.com/o/no-pp.png?alt=media&token=74df93c5-cd95-4982-9cfe-5fc2f7f0ce56",
+        "country": "Egypt",
+        "added_by": "f41a11ad-9da8-4dce-a6f5-66c9c4ded930"
+      },
+      "derived_gender": "Male",
+      "last_message": {
+        "id": "ee4bbe5b-bf83-46e8-8e41-30fd35ecd868",
+        "content": "التقييم \nhttps://www.loom.com/share/2ca2f107509c458083f10ad61fd91664",
+        "type": "text",
+        "created_at": "2026-03-01T03:21:22.573169+00:00",
+        "sender_staff_id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+        "sender_client_id": null
+      },
+      "unread_count": 300,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": "2026-04-20"
+      }
+    },
+    {
+      "id": "a888b075-e3bb-47be-b128-0fc00d027577",
+      "name": "Ahmed Mahmoud aly's Room",
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2025-11-30T11:01:04.058+00:00",
+      "updated_at": "2026-03-01T03:13:18.111807+00:00",
+      "last_message_id": "1f6e2a9d-5e5d-4794-8d25-a922e4b70cdc",
+      "last_client_message_at": "2026-02-24T17:45:24.796064+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "f262b48a-57b6-4e6a-9195-0062b64f7b11",
+        "code": 1224,
+        "fullname": "Ahmed Mahmoud aly",
+        "email": "Aanwar807@gmail.com",
+        "gender": "male",
+        "profile_picture_url": "https://sellzy.b-cdn.net/chat_media/1770196975396_image_picker_3D42A1F5-61BD-47DD-9C54-5F7A2042443A-23094-000005780D8B3CD2.jpg",
+        "country": "Saudi Arabia",
+        "added_by": "f41a11ad-9da8-4dce-a6f5-66c9c4ded930"
+      },
+      "derived_gender": "Male",
+      "last_message": {
+        "id": "1f6e2a9d-5e5d-4794-8d25-a922e4b70cdc",
+        "content": "اتقييم \nhttps://www.loom.com/share/fc732d9f830b4782bda3e0bf4ef608bd",
+        "type": "text",
+        "created_at": "2026-03-01T03:13:18.111807+00:00",
+        "sender_staff_id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+        "sender_client_id": null
+      },
+      "unread_count": 186,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": "2026-02-09"
+      }
+    },
+    {
+      "id": "f63f3b96-1ae7-48ae-8020-fcbd9a90c37d",
+      "name": "Mohamed Hossam Alsaed's Room",
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2025-11-30T01:44:11.791+00:00",
+      "updated_at": "2026-03-01T03:08:49.608021+00:00",
+      "last_message_id": "12aed856-6355-4082-8d66-6fd58a17bfb2",
+      "last_client_message_at": "2026-02-24T14:28:32.542874+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "235d4fc3-0dce-409c-996a-3e19db2e664e",
+        "code": 1638,
+        "fullname": "Mohamed Hossam Alsaed",
+        "email": "Mohamed_hosam1@outlook.com",
+        "gender": "male",
+        "profile_picture_url": "https://firebasestorage.googleapis.com/v0/b/fitch-69506.appspot.com/o/no-pp.png?alt=media&token=74df93c5-cd95-4982-9cfe-5fc2f7f0ce56",
+        "country": "Egypt",
+        "added_by": "f41a11ad-9da8-4dce-a6f5-66c9c4ded930"
+      },
+      "derived_gender": "Male",
+      "last_message": {
+        "id": "12aed856-6355-4082-8d66-6fd58a17bfb2",
+        "content": "التقييم \nhttps://www.loom.com/share/479aa793f35548919f21592db875f24b",
+        "type": "text",
+        "created_at": "2026-03-01T03:08:49.608021+00:00",
+        "sender_staff_id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+        "sender_client_id": null
+      },
+      "unread_count": 221,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": "2026-04-24"
+      }
+    },
+    {
+      "id": "beb0d5e4-c9a4-4c5f-a9fe-d6c0eaf692a3",
+      "name": null,
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2026-01-03T14:48:34.983017+00:00",
+      "updated_at": "2026-03-01T03:04:51.70144+00:00",
+      "last_message_id": "6961ae59-9b93-4b5e-8eae-1c343eaa4a16",
+      "last_client_message_at": "2026-02-28T16:07:19.496282+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "238b5ddf-438a-4474-8813-36bfbbc1d098",
+        "code": 2571,
+        "fullname": "Ahmed Nabil Mousa",
+        "email": "ahmedmousa7100@gmail.com",
+        "gender": "male",
+        "profile_picture_url": null,
+        "country": "United Arab Emirates",
+        "added_by": "1cd22ced-d7cf-49cd-a467-c4047949a26c"
+      },
+      "derived_gender": "male",
+      "last_message": {
+        "id": "6961ae59-9b93-4b5e-8eae-1c343eaa4a16",
+        "content": "التقييم \nhttps://www.loom.com/share/34ba7508d63748428a2d747c232d6116",
+        "type": "text",
+        "created_at": "2026-03-01T03:04:51.70144+00:00",
+        "sender_staff_id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+        "sender_client_id": null
+      },
+      "unread_count": 126,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "1cd22ced-d7cf-49cd-a467-c4047949a26c",
+          "fullname": "Hadeer Elbanna",
+          "profile_picture_url": null,
+          "role": "Sales teamleader"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": null
+      }
+    },
+    {
+      "id": "f468283e-0347-4a83-a8a0-5613ed09d07f",
+      "name": "Ahmed Zakaria Rifai's Room",
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2025-12-08T19:06:53.19+00:00",
+      "updated_at": "2026-03-01T03:02:35.022034+00:00",
+      "last_message_id": "d9cb6579-97b2-4178-910d-eca87ee1d2a2",
+      "last_client_message_at": "2026-02-28T15:12:32.989871+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "b2232e31-9fb3-4d41-aa20-b4d74ea08728",
+        "code": 2120,
+        "fullname": "Ahmed Zakaria Rifai",
+        "email": "AhmedZakariaa96@gmail.com",
+        "gender": "male",
+        "profile_picture_url": "https://firebasestorage.googleapis.com/v0/b/fitch-69506.appspot.com/o/no-pp.png?alt=media&token=74df93c5-cd95-4982-9cfe-5fc2f7f0ce56",
+        "country": "Egypt",
+        "added_by": "f41a11ad-9da8-4dce-a6f5-66c9c4ded930"
+      },
+      "derived_gender": "ذكر",
+      "last_message": {
+        "id": "d9cb6579-97b2-4178-910d-eca87ee1d2a2",
+        "content": "التقييم \nhttps://www.loom.com/share/45e15d929d6345e3bbd89f8fa0e9d9cc",
+        "type": "text",
+        "created_at": "2026-03-01T03:02:35.022034+00:00",
+        "sender_staff_id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+        "sender_client_id": null
+      },
+      "unread_count": 400,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": "2026-08-14"
+      }
+    },
+    {
+      "id": "912d9139-c526-4a3d-babc-aa67ad80dd39",
+      "name": "Ahmed esmat 's Room",
+      "image_url": null,
+      "is_group": false,
+      "created_at": "2025-11-30T02:39:07.078+00:00",
+      "updated_at": "2026-03-01T02:59:46.217728+00:00",
+      "last_message_id": "d495fa10-aa59-4b94-864a-9ee2c6a51a02",
+      "last_client_message_at": "2026-02-28T20:44:11.88011+00:00",
+      "tenant_id": "fitstn",
+      "client": {
+        "id": "dc6209e1-7a09-4e38-a8c3-0495efbc6e79",
+        "code": 1283,
+        "fullname": "Ahmed esmat ",
+        "email": "a7med.3smat@gmail.com",
+        "gender": "male",
+        "profile_picture_url": "https://firebasestorage.googleapis.com/v0/b/bassiouny-d2836.firebasestorage.app/o/ZOp5o2YB06RsUjlks7C8G4sBQhK2%2FJPEG_20251203_160819_5508494940883425713.jpg?alt=media&token=a88cc893-c14a-4355-a34f-d1f124db9c37",
+        "country": "Egypt",
+        "added_by": "f41a11ad-9da8-4dce-a6f5-66c9c4ded930"
+      },
+      "derived_gender": "ذكر",
+      "last_message": {
+        "id": "d495fa10-aa59-4b94-864a-9ee2c6a51a02",
+        "content": "التقييم \nhttps://www.loom.com/share/be22a982852344c59a2beb2baa3925b5",
+        "type": "text",
+        "created_at": "2026-03-01T02:59:46.217728+00:00",
+        "sender_staff_id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+        "sender_client_id": null
+      },
+      "unread_count": 428,
+      "is_marked_unread": false,
+      "assigned_staff": [
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "07785e8d-435a-47d1-8753-41a203e5f3e0",
+          "fullname": "Mohamed Awad",
+          "profile_picture_url": null,
+          "role": "Follow up coach"
+        },
+        {
+          "id": "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
+          "fullname": "Bahaa Ahmed",
+          "profile_picture_url": null,
+          "role": "Follow up teamleader"
+        },
+        {
+          "id": "62857e2a-aeb5-4d32-843c-0cb0487676d0",
+          "fullname": "Ahmed Elbasuony",
+          "profile_picture_url": null,
+          "role": "businessOwner"
+        }
+      ],
+      "subscription": {
+        "status": "active",
+        "plan_name": "Fit Solo Pro",
+        "end_date": "2026-12-12"
+      }
+    }
+  ],
+  "total": 3128,
+  "limit": 10,
+  "offset": 0,
+  "hasMore": true
+}
