@@ -536,6 +536,42 @@
             font-size: 10px;
         }
 
+        /* PDF Export Selection UI */
+        .message-export-select {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .message-export-select:hover {
+            opacity: 1;
+        }
+
+        .export-start-radio {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+        }
+
+        .export-start-label {
+            cursor: pointer;
+            font-size: 14px;
+            user-select: none;
+        }
+
+        .message[data-message-id] {
+            position: relative;
+        }
+
+        .message:has(.export-start-radio:checked) {
+            box-shadow: 0 0 0 2px #2196F3;
+        }
+
         .message-image img,
         .message-video video,
         .message-audio audio {
@@ -845,17 +881,17 @@
 
         /* Message Comments Styles */
         .message-comment-section {
-            margin-top: 10px;
-            padding-top: 8px;
+            margin-top: 4px;
+            padding-top: 4px;
             border-top: 1px solid rgba(255,255,255,0.3);
         }
 
         .message-comment-toggle {
-            font-size: 11px;
+            font-size: 10px;
             color: #666;
             cursor: pointer;
             display: inline-block;
-            padding: 4px 8px;
+            padding: 2px 5px;
             background: rgba(0,0,0,0.05);
             border-radius: 3px;
             transition: all 0.2s;
@@ -866,7 +902,7 @@
         }
 
         .message-comment-input {
-            margin-top: 8px;
+            margin-top: 4px;
             display: none;
         }
 
@@ -876,51 +912,54 @@
 
         .message-comment-input textarea {
             width: 100%;
-            padding: 6px 8px;
+            padding: 4px 5px;
             border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 12px;
+            border-radius: 3px;
+            font-size: 11px;
             font-family: inherit;
             resize: vertical;
-            min-height: 40px;
+            min-height: 28px;
+            max-height: 70px;
             box-sizing: border-box;
         }
 
         .message-comment-input textarea:focus {
             outline: none;
             border-color: #2196F3;
-            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+            box-shadow: 0 0 0 1px rgba(33, 150, 243, 0.2);
         }
 
         .message-comment-display {
-            margin-top: 8px;
-            padding: 8px;
+            margin-top: 4px;
+            padding: 4px 5px;
             background: rgba(255,255,255,0.5);
-            border-left: 3px solid #2196F3;
-            border-radius: 4px;
-            font-size: 12px;
-            line-height: 1.4;
-            white-space: pre-wrap;
+            border-left: 2px solid #2196F3;
+            border-radius: 3px;
+            font-size: 14px;
+            line-height: 1.3;
         }
 
         .message-comment-display .comment-header {
             font-weight: 600;
             color: #2196F3;
-            margin-bottom: 4px;
-            font-size: 11px;
+            margin-bottom: 2px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .message-comment-actions {
             display: flex;
-            gap: 6px;
-            margin-top: 6px;
+            gap: 3px;
+            margin-top: 3px;
         }
 
         .message-comment-btn {
-            padding: 4px 10px;
+            padding: 2px 6px;
             border: none;
             border-radius: 3px;
-            font-size: 11px;
+            font-size: 10px;
             cursor: pointer;
             transition: all 0.2s;
         }
@@ -946,14 +985,164 @@
         .message-comment-btn-edit {
             background: #2196F3;
             color: white;
-            font-size: 10px;
-            padding: 3px 8px;
+            font-size: 9px;
+            padding: 1px 5px;
+            vertical-align: middle;
         }
 
         .message-comment-btn-edit:hover {
             background: #0b7dda;
         }
+
+        /* Global Action Buttons */
+        .global-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            justify-content: center;
+        }
+
+        .action-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .action-btn-reset {
+            background: #f44336;
+            color: white;
+        }
+
+        .action-btn-reset:hover {
+            background: #da190b;
+        }
+
+        .action-btn-export {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .action-btn-export:hover {
+            background: #45a049;
+        }
+
+        /* Conversation Actions */
+        .conversation-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .conv-action-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .conv-action-btn-reset {
+            background: #ff5722;
+            color: white;
+        }
+
+        .conv-action-btn-reset:hover {
+            background: #e64a19;
+        }
+
+        .conv-action-btn-export {
+            background: #2196F3;
+            color: white;
+        }
+
+        .conv-action-btn-export:hover {
+            background: #0b7dda;
+        }
+
+        /* PDF Export Styles */
+        #pdfContent {
+            display: none;
+        }
+
+        .pdf-page {
+            page-break-after: always;
+            padding: 40px;
+            font-family: Arial, sans-serif;
+        }
+
+        .pdf-header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 3px solid #2196F3;
+            padding-bottom: 20px;
+        }
+
+        .pdf-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .pdf-subtitle {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .pdf-client-header {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .pdf-message {
+            margin: 15px 0;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .pdf-message-staff {
+            background: #e3f2fd;
+            margin-right: 50px;
+        }
+
+        .pdf-message-client {
+            background: #f1f8e9;
+            margin-left: 50px;
+        }
+
+        .pdf-message-meta {
+            font-size: 10px;
+            color: #666;
+            margin-top: 8px;
+            border-top: 1px solid rgba(0,0,0,0.1);
+            padding-top: 6px;
+        }
+
+        .pdf-kpi-section {
+            margin-top: 30px;
+            page-break-inside: avoid;
+        }
+
+        .pdf-kpi-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-left: 4px solid #2196F3;
+        }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -964,6 +1153,14 @@
                 <input type="file" id="jsonFileInput" accept=".json" />
             </div>
             <div class="summary" id="summary"></div>
+            <div class="global-actions" id="globalActions" style="display: none;">
+                <button class="action-btn action-btn-export" onclick="exportAllConversationsToPDF()">
+                    📄 Export All to PDF
+                </button>
+                <button class="action-btn action-btn-reset" onclick="resetAllData()">
+                    🗑️ Reset All Data
+                </button>
+            </div>
         </header>
 
         <div class="agent-tabs" id="agentTabs"></div>
@@ -1000,6 +1197,7 @@
         let currentClient = null;
         let searchTerm = '';
         let staffData = null;
+        let selectedExportStartMessageId = null; // For PDF export start point selection
 
         // Load staff data from staff.json
         fetch('staff.json')
@@ -1051,7 +1249,14 @@
             if (textarea) {
                 const comment = textarea.value;
                 saveMessageComment(clientCode, messageId, comment);
-                location.reload(); // Reload to show updated comment
+                
+                // Save scroll position before re-rendering
+                const conversationView = document.getElementById('conversationView');
+                const messagesContainer = conversationView ? conversationView.querySelector('.messages') : null;
+                const scrollPosition = messagesContainer ? messagesContainer.scrollTop : 0;
+                
+                // Re-render the conversation to show the updated comment
+                renderConversation(scrollPosition);
             }
         }
 
@@ -1059,8 +1264,58 @@
             const section = document.getElementById(`comment-input-${messageId}`);
             if (section) {
                 section.classList.remove('active');
+                // Reset textarea to saved value
+                const textarea = document.getElementById(`comment-textarea-${messageId}`);
+                if (textarea && currentClient) {
+                    const savedComment = getMessageComment(currentClient.client.code, messageId);
+                    textarea.value = savedComment;
+                }
             }
         }
+
+        // Event delegation for message comment buttons
+        document.addEventListener('click', function(e) {
+            const target = e.target;
+            
+            // Handle toggle button
+            if (target.classList.contains('message-comment-toggle')) {
+                const messageId = target.dataset.messageId;
+                if (messageId) toggleMessageComment(messageId);
+            }
+            
+            // Handle save button
+            if (target.classList.contains('message-comment-btn-save') || target.closest('.message-comment-btn-save')) {
+                const btn = target.classList.contains('message-comment-btn-save') ? target : target.closest('.message-comment-btn-save');
+                const messageId = btn.dataset.messageId;
+                const clientCode = btn.dataset.clientCode;
+                if (messageId && clientCode) {
+                    saveCommentForMessage(clientCode, messageId);
+                }
+            }
+            
+            // Handle cancel button
+            if (target.classList.contains('message-comment-btn-cancel') || target.closest('.message-comment-btn-cancel')) {
+                const btn = target.classList.contains('message-comment-btn-cancel') ? target : target.closest('.message-comment-btn-cancel');
+                const messageId = btn.dataset.messageId;
+                if (messageId) cancelCommentEdit(messageId);
+            }
+            
+            // Handle edit button
+            if (target.classList.contains('message-comment-btn-edit') || target.closest('.message-comment-btn-edit')) {
+                const btn = target.classList.contains('message-comment-btn-edit') ? target : target.closest('.message-comment-btn-edit');
+                const messageId = btn.dataset.messageId;
+                if (messageId) toggleMessageComment(messageId);
+            }
+            
+            // Handle export start message selection
+            if (target.classList.contains('export-start-radio')) {
+                const messageId = target.dataset.messageId;
+                if (messageId) {
+                    selectedExportStartMessageId = messageId;
+                    console.log('PDF export will start from message:', messageId);
+                }
+            }
+        });
 
         // Handle file selection
         document.getElementById('jsonFileInput').addEventListener('change', function(e) {
@@ -1105,6 +1360,9 @@
                     <div class="stat-value">${new Date(data.filter_criteria.date_range.from).toLocaleDateString()} - ${new Date(data.filter_criteria.date_range.to).toLocaleDateString()}</div>
                 </div>
             `;
+            
+            // Show global actions
+            document.getElementById('globalActions').style.display = 'flex';
         }
 
         function renderAgentTabs() {
@@ -1411,7 +1669,10 @@
             }
         }
 
-        function renderConversation() {
+        function renderConversation(preservedScrollPosition = null) {
+            // Reset export start message selection when switching conversations
+            selectedExportStartMessageId = null;
+            
             const conversationView = document.getElementById('conversationView');
             const insightsPanel = document.getElementById('insightsPanel');
             const client = currentClient.client;
@@ -1453,6 +1714,17 @@
                             <div class="client-meta" style="margin-top: 8px;">
                                 <div class="meta-item"><strong>Unread:</strong> ${room.unread_count}</div>
                                 <div class="meta-item"><strong>Last message:</strong> ${new Date(room.last_client_message_at).toLocaleString()}</div>
+                            </div>
+                            <div class="conversation-actions">
+                                <button class="conv-action-btn conv-action-btn-export" onclick="exportConversationToPDF()">
+                                    📄 Export PDF
+                                </button>
+                                <button class="conv-action-btn" onclick="clearExportSelection()" title="Clear PDF export start point selection">
+                                    🔄 Clear Selection
+                                </button>
+                                <button class="conv-action-btn conv-action-btn-reset" onclick="resetConversationData()">
+                                    🗑️ Reset Data
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1498,6 +1770,10 @@
                                 <div class="legend-client legend-client-sla"></div>
                                 <span>⚠️ SLA Violation (No timely response)</span>
                             </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11px; color: #666;">
+                            💡 <strong>PDF Export Tip:</strong> Click the 📄 icon on any message to select it as the start point for PDF export. 
+                            Use "Clear Selection" to export the full conversation.
                         </div>
                     </div>
                     ${messages.length === 0 ? '<div class="empty-state">No messages in the last 30 days</div>' : 
@@ -1569,11 +1845,15 @@
                 ${renderKPIScoring(client.code)}
             `;
 
-            // Scroll to bottom of messages container
+            // Scroll handling: preserve position if provided, otherwise scroll to bottom
             setTimeout(() => {
                 const messagesContainer = conversationView.querySelector('.messages');
                 if (messagesContainer) {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    if (preservedScrollPosition !== null) {
+                        messagesContainer.scrollTop = preservedScrollPosition;
+                    } else {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
                 }
             }, 100);
         }
@@ -1936,19 +2216,21 @@
                     commentSection = `
                         <div class="message-comment-section">
                             <div class="message-comment-display">
-                                <div class="comment-header">💬 Quality Note:</div>
+                                <div class="comment-header">
+                                    💬 Quality Note:
+                                    <button class="message-comment-btn message-comment-btn-edit" data-message-id="${msg.id}">
+                                        ✏️ Edit
+                                    </button>
+                                </div>
                                 ${escapeHtml(savedComment)}
-                                <button class="message-comment-btn message-comment-btn-edit" onclick="toggleMessageComment('${msg.id}')">
-                                    ✏️ Edit
-                                </button>
                             </div>
                             <div class="message-comment-input" id="comment-input-${msg.id}">
-                                <textarea id="comment-textarea-${msg.id}" placeholder="Add quality assessment note...">${savedComment}</textarea>
+                                <textarea id="comment-textarea-${msg.id}" placeholder="Add quality assessment note...">${escapeHtml(savedComment)}</textarea>
                                 <div class="message-comment-actions">
-                                    <button class="message-comment-btn message-comment-btn-save" onclick="saveCommentForMessage('${currentClient.client.code}', '${msg.id}')">
+                                    <button class="message-comment-btn message-comment-btn-save" data-message-id="${msg.id}" data-client-code="${currentClient.client.code}">
                                         💾 Save
                                     </button>
-                                    <button class="message-comment-btn message-comment-btn-cancel" onclick="cancelCommentEdit('${msg.id}')">
+                                    <button class="message-comment-btn message-comment-btn-cancel" data-message-id="${msg.id}">
                                         ✖ Cancel
                                     </button>
                                 </div>
@@ -1958,16 +2240,16 @@
                 } else {
                     commentSection = `
                         <div class="message-comment-section">
-                            <div class="message-comment-toggle" onclick="toggleMessageComment('${msg.id}')">
+                            <div class="message-comment-toggle" data-message-id="${msg.id}">
                                 💬 Add quality note
                             </div>
                             <div class="message-comment-input" id="comment-input-${msg.id}">
                                 <textarea id="comment-textarea-${msg.id}" placeholder="Add quality assessment note..."></textarea>
                                 <div class="message-comment-actions">
-                                    <button class="message-comment-btn message-comment-btn-save" onclick="saveCommentForMessage('${currentClient.client.code}', '${msg.id}')">
+                                    <button class="message-comment-btn message-comment-btn-save" data-message-id="${msg.id}" data-client-code="${currentClient.client.code}">
                                         💾 Save
                                     </button>
-                                    <button class="message-comment-btn message-comment-btn-cancel" onclick="cancelCommentEdit('${msg.id}')">
+                                    <button class="message-comment-btn message-comment-btn-cancel" data-message-id="${msg.id}">
                                         ✖ Cancel
                                     </button>
                                 </div>
@@ -1978,7 +2260,15 @@
             }
 
             return `
-                <div class="message ${messageClass}">
+                <div class="message ${messageClass}" data-message-id="${msg.id}">
+                    <div class="message-export-select">
+                        <input type="radio" 
+                               name="export-start-message" 
+                               class="export-start-radio" 
+                               data-message-id="${msg.id}"
+                               ${selectedExportStartMessageId === msg.id ? 'checked' : ''}>
+                        <label class="export-start-label" title="Select as PDF export start point">📄</label>
+                    </div>
                     ${content}
                     <div class="message-meta">
                         <span>${sender}</span>
@@ -1996,6 +2286,293 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML.replace(/\n/g, '<br>');
+        }
+
+        // Reset Functions
+        function resetAllData() {
+            if (confirm('⚠️ Are you sure you want to reset ALL KPI scores and message comments for ALL conversations? This action cannot be undone!')) {
+                // Clear all localStorage data
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key.startsWith('kpi_scores_') || key.startsWith('msg_comment_')) {
+                        keysToRemove.push(key);
+                    }
+                }
+                
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+                
+                alert(`✅ Successfully reset ${keysToRemove.length} items. Refreshing page...`);
+                location.reload();
+            }
+        }
+
+        function clearExportSelection() {
+            selectedExportStartMessageId = null;
+            // Uncheck all radio buttons
+            document.querySelectorAll('.export-start-radio').forEach(radio => {
+                radio.checked = false;
+            });
+            console.log('PDF export start point selection cleared - will export full conversation');
+        }
+
+        function resetConversationData() {
+            if (!currentClient) return;
+            
+            const clientCode = currentClient.client.code;
+            const clientName = currentClient.client.fullname;
+            
+            if (confirm(`⚠️ Are you sure you want to reset all KPI scores and message comments for ${clientName}?`)) {
+                // Remove KPI scores
+                localStorage.removeItem(getStorageKey(clientCode));
+                
+                // Remove message comments
+                currentClient.messages.forEach(msg => {
+                    if (msg.sender_staff_id) {
+                        const key = getMessageCommentKey(clientCode, msg.id);
+                        localStorage.removeItem(key);
+                    }
+                });
+                
+                alert(`✅ Data reset for ${clientName}. Refreshing conversation...`);
+                renderConversation();
+            }
+        }
+
+        // PDF Export Functions
+        function generateConversationHTML(client, includeTitle = true, startMessageId = null) {
+            const scores = loadScores(client.client.code);
+            const totalScore = calculateTotalScore(scores);
+            const scoredKpis = Object.keys(scores).filter(k => k !== 'notes').length;
+            
+            let html = '';
+            
+            if (includeTitle) {
+                html += `
+                    <div class="pdf-header">
+                        <div class="pdf-title">Quality Assessment Report</div>
+                        <div class="pdf-subtitle">Generated on ${new Date().toLocaleString()}</div>
+                    </div>
+                `;
+            }
+            
+            html += `
+                <div class="pdf-client-header">
+                    <h2 style="margin: 0 0 10px 0; color: #2c3e50;">${client.client.fullname}</h2>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 12px;">
+                        <div><strong>Code:</strong> ${client.client.code}</div>
+                        <div><strong>Email:</strong> ${client.client.email || 'N/A'}</div>
+                        <div><strong>Gender:</strong> ${client.client.gender || 'N/A'}</div>
+                        <div><strong>Country:</strong> ${client.client.country || 'N/A'}</div>
+                        <div><strong>Total Messages:</strong> ${client.messages.length}</div>
+                        <div><strong>Unread:</strong> ${client.room.unread_count}</div>
+                    </div>
+                </div>
+            `;
+            
+            // KPI Scores Section
+            if (scoredKpis > 0) {
+                html += `
+                    <div class="pdf-kpi-section">
+                        <h3 style="color: #2196F3; margin-bottom: 15px;">📊 Quality Assessment</h3>
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px;">
+                            <div style="font-size: 12px;">Overall Weighted Quality Score</div>
+                            <div style="font-size: 28px; font-weight: bold; margin: 5px 0;">${totalScore}%</div>
+                            <div style="font-size: 11px;">${scoredKpis} / ${kpiList.length} KPIs Scored</div>
+                        </div>
+                `;
+                
+                kpiList.forEach(kpi => {
+                    if (scores[kpi.id] !== null && scores[kpi.id] !== undefined) {
+                        const kpiNote = scores.notes && scores.notes[kpi.id] ? scores.notes[kpi.id] : '';
+                        html += `
+                            <div class="pdf-kpi-item">
+                                <div style="font-weight: 600; margin-bottom: 5px;">
+                                    <span style="color: #2196F3;">${kpi.weight}%</span> - ${kpi.label}
+                                </div>
+                                <div style="font-size: 11px;">
+                                    Score: ${'⭐'.repeat(scores[kpi.id])} (${scores[kpi.id]}/5) | 
+                                    Weighted: ${((scores[kpi.id] / 5) * kpi.weight).toFixed(1)}%
+                                </div>
+                                ${kpiNote ? `<div style="margin-top: 5px; padding: 8px; background: #f9f9f9; border-left: 3px solid #2196F3; font-size: 11px; font-style: italic;">${kpiNote.replace(/\n/g, '<br>')}</div>` : ''}
+                            </div>
+                        `;
+                    }
+                });
+                
+                html += `</div>`;
+            }
+            
+            // Messages Section
+            const sortedMessages = client.messages.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            
+            // Filter messages if a start message ID is specified
+            let messagesToExport = sortedMessages;
+            if (startMessageId) {
+                const startIndex = sortedMessages.findIndex(msg => msg.id === startMessageId);
+                if (startIndex !== -1) {
+                    messagesToExport = sortedMessages.slice(startIndex);
+                }
+            }
+            
+            html += `
+                <div style="margin-top: 30px;">
+                    <h3 style="color: #2196F3; margin-bottom: 15px;">💬 Conversation History (${messagesToExport.length} messages${startMessageId ? ' - starting from selected message' : ''})</h3>
+            `;
+            
+            let previousDate = null;
+            
+            messagesToExport.forEach(msg => {
+                const isStaff = msg.sender_staff_id !== null;
+                const timestamp = new Date(msg.created_at);
+                const currentDateStr = timestamp.toDateString();
+                
+                // Date divider
+                if (previousDate !== currentDateStr) {
+                    const today = new Date();
+                    const yesterday = new Date(today);
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    
+                    let dateLabel;
+                    if (timestamp.toDateString() === today.toDateString()) {
+                        dateLabel = 'Today';
+                    } else if (timestamp.toDateString() === yesterday.toDateString()) {
+                        dateLabel = 'Yesterday';
+                    } else {
+                        dateLabel = timestamp.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                    }
+                    
+                    html += `<div style="text-align: center; margin: 20px 0; color: #666; font-size: 12px; font-weight: 600;">${dateLabel}</div>`;
+                    previousDate = currentDateStr;
+                }
+                
+                const sender = isStaff ? getStaffName(msg.sender_staff_id) : 'Client';
+                const messageClass = isStaff ? 'pdf-message-staff' : 'pdf-message-client';
+                const senderIcon = isStaff ? '👨‍💼' : '👤';
+                
+                let content = '';
+                if (msg.type === 'text' && msg.content) {
+                    content = msg.content.replace(/\n/g, '<br>');
+                } else {
+                    content = `[${msg.type.toUpperCase()}]`;
+                }
+                
+                const messageComment = isStaff ? getMessageComment(client.client.code, msg.id) : '';
+                
+                html += `
+                    <div class="pdf-message ${messageClass}">
+                        <div style="font-weight: 600; margin-bottom: 5px;">${senderIcon} ${sender}</div>
+                        <div>${content}</div>
+                        ${messageComment ? `<div style="margin-top: 8px; padding: 6px; background: rgba(33, 150, 243, 0.1); border-left: 2px solid #2196F3; font-size: 10px;"><strong>💬 Quality Note:</strong><br>${messageComment.replace(/\n/g, '<br>')}</div>` : ''}
+                        <div class="pdf-message-meta">
+                            ${timestamp.toLocaleString()} | Type: ${msg.type}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `</div>`;
+            
+            return html;
+        }
+
+        function exportConversationToPDF() {
+            if (!currentClient) {
+                alert('No conversation selected!');
+                return;
+            }
+            
+            const content = generateConversationHTML(currentClient, true, selectedExportStartMessageId);
+            const element = document.createElement('div');
+            element.innerHTML = content;
+            element.style.padding = '40px';
+            element.style.fontFamily = 'Arial, sans-serif';
+            element.style.width = '210mm'; // A4 width
+            element.style.minHeight = '297mm'; // A4 height
+            
+            const opt = {
+                margin: 10,
+                filename: `QA_Report_${currentClient.client.code}_${new Date().toISOString().split('T')[0]}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { 
+                    scale: 2, 
+                    useCORS: true,
+                    letterRendering: true,
+                    logging: false,
+                    scrollY: 0,
+                    scrollX: 0,
+                    windowHeight: document.documentElement.scrollHeight
+                },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak: { mode: ['avoid-all', 'css', 'legacy'], before: '.pdf-client-header', avoid: '.pdf-message' }
+            };
+            
+            html2pdf().set(opt).from(element).save();
+        }
+
+        function exportAllConversationsToPDF() {
+            if (!data || !currentAgent) {
+                alert('No data loaded!');
+                return;
+            }
+            
+            const agentData = data.by_agent[currentAgent];
+            if (!agentData || !agentData.clients || agentData.clients.length === 0) {
+                alert('No conversations to export!');
+                return;
+            }
+            
+            if (!confirm(`Export ${agentData.clients.length} conversations to PDF? This may take a moment...`)) {
+                return;
+            }
+            
+            let fullHTML = `
+                <div class="pdf-header">
+                    <div class="pdf-title">Complete Quality Assessment Report</div>
+                    <div class="pdf-subtitle">Agent: ${currentAgent}</div>
+                    <div class="pdf-subtitle">Generated on ${new Date().toLocaleString()}</div>
+                    <div class="pdf-subtitle">${agentData.clients.length} Conversations</div>
+                </div>
+                <div style="page-break-after: always;"></div>
+            `;
+            
+            agentData.clients.forEach((client, index) => {
+                fullHTML += `<div class="pdf-page">`;
+                fullHTML += `<h2 style="color: #2196F3; margin-bottom: 20px;">Conversation ${index + 1} of ${agentData.clients.length}</h2>`;
+                fullHTML += generateConversationHTML(client, false);
+                fullHTML += `</div>`;
+                
+                if (index < agentData.clients.length - 1) {
+                    fullHTML += `<div style="page-break-after: always;"></div>`;
+                }
+            });
+            
+            const element = document.createElement('div');
+            element.innerHTML = fullHTML;
+            element.style.fontFamily = 'Arial, sans-serif';
+            element.style.width = '210mm'; // A4 width
+            element.style.minHeight = '297mm'; // A4 height
+            
+            const opt = {
+                margin: 10,
+                filename: `Complete_QA_Report_${currentAgent}_${new Date().toISOString().split('T')[0]}.pdf`,
+                image: { type: 'jpeg', quality: 0.95 },
+                html2canvas: { 
+                    scale: 2, 
+                    useCORS: true,
+                    letterRendering: true,
+                    logging: false,
+                    scrollY: 0,
+                    scrollX: 0,
+                    windowHeight: document.documentElement.scrollHeight
+                },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak: { mode: ['avoid-all', 'css', 'legacy'], before: '.pdf-client-header', avoid: '.pdf-message' }
+            };
+            
+            html2pdf().set(opt).from(element).save().then(() => {
+                alert('✅ PDF export complete!');
+            });
         }
 
         // Search functionality
