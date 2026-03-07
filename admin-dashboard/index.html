@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #333; color: #fff; }
+        tr:hover { background: #f9f9f9; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+    </style>
+</head>
+<body>
+    <h1>Sessions</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Chat Name</th>
+                <th>Chat Preview</th>
+                <th>Clicked At</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody id="sessions-body">
+            <tr><td colspan="5" class="empty">Loading...</td></tr>
+        </tbody>
+    </table>
+    <script>
+        function formatDuration(seconds) {
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (mins < 60) return mins + 'm ' + secs + 's';
+            const hours = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hours + 'h ' + remMins + 'm';
+        }
+
+        async function loadSessions() {
+            const tbody = document.getElementById("sessions-body");
+            try {
+                const res = await fetch("/api/sessions");
+                const data = await res.json();
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty">No sessions yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.map(row => `
+                    <tr>
+                        <td>${row.id}</td>
+                        <td>${row.chat_name || "-"}</td>
+                        <td>${row.chat_preview || "-"}</td>
+                        <td>${new Date(row.clicked_at).toLocaleString()}</td>
+                        <td>${row.duration_seconds != null ? formatDuration(row.duration_seconds) : formatDuration(Math.round((Date.now() - new Date(row.clicked_at).getTime()) / 1000))}</td>
+                    </tr>
+                `).join("");
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty">Failed to load sessions.</td></tr>';
+            }
+        }
+        loadSessions();
+        setInterval(loadSessions, 3000);
+    </script>
+</body>
+</html>
