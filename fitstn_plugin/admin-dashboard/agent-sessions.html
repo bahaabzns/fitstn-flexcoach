@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Sessions</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0 0 8px 0; }
+        .hidden { display: none; }
+
+        .agent-nav { margin-bottom: 20px; }
+        .agent-nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        .agent-nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+
+        .overview-toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+        .overview-toolbar .field { min-width: 180px; }
+        .overview-toolbar label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .overview-toolbar input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 160px; }
+        .period-toggle { display: flex; gap: 0; }
+        .period-toggle button {
+            padding: 8px 16px; border: 1px solid #ddd; background: #fff; cursor: pointer;
+            font-size: 13px; font-weight: 500; color: #555;
+        }
+        .period-toggle button:first-child { border-radius: 4px 0 0 4px; }
+        .period-toggle button:last-child { border-radius: 0 4px 4px 0; }
+        .period-toggle button.active { background: #333; color: #fff; border-color: #333; }
+
+        .period-label { font-size: 13px; color: #777; margin-bottom: 16px; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th { background: #333; color: #fff; padding: 10px 14px; text-align: left; font-size: 13px; }
+        td { padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 13px; color: #444; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background: #f9f9f9; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: bold; }
+        .badge-active { background: #d4edda; color: #155724; }
+        .badge-ended { background: #e2e3e5; color: #383d41; }
+    </style>
+</head>
+<body>
+    <h1 id="page-title">My Sessions</h1>
+
+    <nav class="agent-nav">
+        <a href="/overview.html">Overview</a>
+        <a href="/agent-sessions.html" class="active">Sessions</a>
+        <a href="/agent-shifts.html">Shifts</a>
+    </nav>
+
+    <div class="overview-toolbar">
+        <div class="field">
+            <label>Period</label>
+            <div class="period-toggle" id="period-toggle">
+                <button onclick="setPeriod('day')" data-period="day">Day</button>
+                <button onclick="setPeriod('week')" data-period="week">Week</button>
+                <button onclick="setPeriod('month')" data-period="month" class="active">Month</button>
+            </div>
+        </div>
+        <div class="field">
+            <label for="ov-date">Date</label>
+            <input type="date" id="ov-date" onchange="loadSessions()">
+        </div>
+    </div>
+
+    <div id="period-label" class="period-label"></div>
+    <div id="sessions-content"></div>
+
+    <script>
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        if (hashParams.get('agentToken')) {
+            localStorage.setItem('agentToken', hashParams.get('agentToken'));
+            history.replaceState(null, '', window.location.pathname);
+        }
+
+        const adminToken = localStorage.getItem('adminToken');
+        const agentToken = localStorage.getItem('agentToken');
+        const token = adminToken || agentToken;
+        const isAgent = !adminToken && !!agentToken;
+
+        if (!token) { window.location.href = '/'; }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) {
+                    localStorage.removeItem('adminToken');
+                    localStorage.removeItem('agentToken');
+                    window.location.href = '/';
+                }
+                return res;
+            });
+        }
+
+        function formatDuration(seconds) {
+            if (seconds == null) return '-';
+            if (seconds < 0) seconds = 0;
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (mins < 60) return mins + 'm ' + secs + 's';
+            const hours = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hours + 'h ' + remMins + 'm';
+        }
+
+        function formatDateTime(isoString) {
+            const d = new Date(isoString);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+                   d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        // Set agent name in title
+        if (isAgent) {
+            authFetch('/api/agent/me').then(r => r.json()).then(data => {
+                const name = data.name || data.email || 'Agent';
+                document.getElementById('page-title').textContent = name + "'s Sessions";
+                document.title = name + "'s Sessions";
+            }).catch(() => {});
+        }
+
+        let currentPeriod = 'month';
+        let agentIdCache = null;
+
+        function setPeriod(period) {
+            currentPeriod = period;
+            document.querySelectorAll('#period-toggle button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === period);
+            });
+            loadSessions();
+        }
+
+        async function getAgentId() {
+            if (agentIdCache) return agentIdCache;
+            const res = await authFetch('/api/agent/me');
+            const data = await res.json();
+            agentIdCache = data.id;
+            return data.id;
+        }
+
+        async function loadSessions() {
+            const container = document.getElementById('sessions-content');
+            const date = document.getElementById('ov-date').value;
+            if (!date) return;
+
+            try {
+                const agentId = await getAgentId();
+                const res = await authFetch(`/api/agent-overview/${agentId}/sessions?period=${currentPeriod}&date=${date}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    container.innerHTML = `<div class="empty">${err.error || 'Failed to load sessions'}</div>`;
+                    return;
+                }
+
+                const data = await res.json();
+
+                // Period label
+                const start = new Date(data.period.start + 'T00:00:00');
+                const end = new Date(data.period.end + 'T00:00:00');
+                const options = { month: 'short', day: 'numeric', year: 'numeric' };
+                const periodLabel = data.period.type === 'day'
+                    ? start.toLocaleDateString('en-US', options)
+                    : start.toLocaleDateString('en-US', options) + ' — ' + end.toLocaleDateString('en-US', options);
+                document.getElementById('period-label').textContent = periodLabel;
+
+                if (data.sessions.length === 0) {
+                    container.innerHTML = '<div class="empty">No sessions found for this period.</div>';
+                    return;
+                }
+
+                let tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Code</th>
+                                <th>Clicked At</th>
+                                <th>Duration</th>
+                                <th>Messages</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.sessions.forEach(session => {
+                    tableHtml += `
+                        <tr>
+                            <td>${session.id}</td>
+                            <td>${session.chat_preview || '-'}</td>
+                            <td>${formatDateTime(session.clicked_at)}</td>
+                            <td>${formatDuration(session.duration_seconds)}</td>
+                            <td>${session.message_count}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHtml += '</tbody></table>';
+                container.innerHTML = tableHtml;
+            } catch (err) {
+                container.innerHTML = '<div class="empty">Failed to load sessions — check your connection.</div>';
+            }
+        }
+
+        // Init
+        document.getElementById('ov-date').value = new Date().toISOString().slice(0, 10);
+        loadSessions();
+    </script>
+</body>
+</html>

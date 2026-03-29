@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Sessions</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #333; color: #fff; }
+        tr:hover { background: #f9f9f9; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .msg-badge { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .msg-badge:hover { background: #c7d2fe; }
+        .msg-badge.loading { background: #fef3c7; color: #92400e; cursor: wait; }
+        .msg-badge.error { background: #fee2e2; color: #b91c1c; }
+        .msg-list { display: none; margin-top: 6px; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .msg-list.open { display: block; }
+        .msg-item { padding: 4px 0; border-bottom: 1px solid #eee; }
+        .msg-item:last-child { border-bottom: none; }
+        .msg-time { color: #9ca3af; font-size: 11px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+
+        .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+        .toolbar .field { min-width: 160px; }
+        .toolbar label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .toolbar input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 150px; }
+        .period-toggle { display: flex; gap: 0; }
+        .period-toggle button {
+            padding: 8px 16px; border: 1px solid #ddd; background: #fff; cursor: pointer;
+            font-size: 13px; font-weight: 500; color: #555;
+        }
+        .period-toggle button:first-child { border-radius: 4px 0 0 4px; }
+        .period-toggle button:last-child { border-radius: 0 4px 4px 0; }
+        .period-toggle button.active { background: #333; color: #fff; border-color: #333; }
+        .period-label { font-size: 13px; color: #777; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Admin Dashboard</h1>
+        <div>
+            <nav style="display:inline;">
+                <a href="/overview.html">Overview</a>
+                <a href="/dashboard.html" class="active">Sessions</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+    <div class="toolbar">
+        <div class="field">
+            <label>Period</label>
+            <div class="period-toggle" id="period-toggle">
+                <button onclick="setPeriod('day')" data-period="day">Day</button>
+                <button onclick="setPeriod('week')" data-period="week">Week</button>
+                <button onclick="setPeriod('month')" data-period="month" class="active">Month</button>
+            </div>
+        </div>
+        <div class="field">
+            <label for="filter-date">Date</label>
+            <input type="date" id="filter-date" onchange="loadSessions()">
+        </div>
+    </div>
+    <div id="period-label" class="period-label"></div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Agent</th>
+                <th>Code</th>
+                <th>Clicked At</th>
+                <th>Duration</th>
+                <th>Messages</th>
+            </tr>
+        </thead>
+        <tbody id="sessions-body">
+            <tr><td colspan="6" class="empty">Loading...</td></tr>
+        </tbody>
+    </table>
+    <script>
+        const token = localStorage.getItem('adminToken');
+        if (!token) { window.location.href = '/'; }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) { localStorage.removeItem('adminToken'); window.location.href = '/'; }
+                return res;
+            });
+        }
+
+        function logout() {
+            authFetch('/api/admin/logout', { method: 'POST' });
+            localStorage.removeItem('adminToken');
+            window.location.href = '/';
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (mins < 60) return mins + 'm ' + secs + 's';
+            const hours = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hours + 'h ' + remMins + 'm';
+        }
+
+        let currentPeriod = 'month';
+
+        function setPeriod(period) {
+            currentPeriod = period;
+            document.querySelectorAll('#period-toggle button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === period);
+            });
+            loadSessions();
+        }
+
+        function renderPeriodLabel(period) {
+            const start = new Date(period.start + 'T00:00:00');
+            const end = new Date(period.end + 'T00:00:00');
+            const options = { month: 'short', day: 'numeric', year: 'numeric' };
+            const label = period.type === 'day'
+                ? start.toLocaleDateString('en-US', options)
+                : start.toLocaleDateString('en-US', options) + ' — ' + end.toLocaleDateString('en-US', options);
+            document.getElementById('period-label').textContent = label;
+        }
+
+        async function loadSessions() {
+            const tbody = document.getElementById("sessions-body");
+            const date = document.getElementById('filter-date').value;
+            if (!date) return;
+            try {
+                const res = await authFetch(`/api/sessions?period=${currentPeriod}&date=${date}`);
+                const response = await res.json();
+                renderPeriodLabel(response.period);
+                const data = response.sessions;
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty">No sessions yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.map(row => {
+                    const cached = msgCache[row.id];
+                    let badgeText = 'View';
+                    let listHtml = '';
+                    let listClass = 'msg-list';
+                    if (cached) {
+                        badgeText = cached.msgs.length + ' msg' + (cached.msgs.length !== 1 ? 's' : '');
+                        if (cached.msgs.length === 0) {
+                            badgeText = '0 msgs';
+                            listHtml = '<div class="msg-item" style="color:#999;">No staff messages in this session</div>';
+                        } else {
+                            listHtml = cached.msgs.map(m =>
+                                `<div class="msg-item"><span class="msg-time">${new Date(m.sent_at).toLocaleTimeString()}</span> ${escapeHtml(m.text || '[' + m.type + ']')}</div>`
+                            ).join('');
+                        }
+                        if (cached.open) listClass += ' open';
+                    }
+                    return `<tr>
+                        <td>${row.id}</td>
+                        <td>${row.agent_name || row.agent_email || "-"}</td>
+                        <td>${row.chat_preview || "-"}</td>
+                        <td>${new Date(row.clicked_at).toLocaleString()}</td>
+                        <td>${row.duration_seconds != null ? formatDuration(row.duration_seconds) : formatDuration(Math.round((Date.now() - new Date(row.clicked_at).getTime()) / 1000))}</td>
+                        <td>
+                            <span class="msg-badge" onclick="loadMessages(this, ${row.id})">${badgeText}</span>
+                            <div class="${listClass}" id="msgs-${row.id}">${listHtml}</div>
+                        </td>
+                    </tr>`;
+                }).join("");
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty">Failed to load sessions.</td></tr>';
+            }
+        }
+        const msgCache = {};
+        async function loadMessages(badge, sessionId) {
+            const listEl = document.getElementById('msgs-' + sessionId);
+            if (!listEl) return;
+
+            // Toggle if already loaded
+            if (msgCache[sessionId]) {
+                msgCache[sessionId].open = !msgCache[sessionId].open;
+                listEl.classList.toggle('open');
+                return;
+            }
+
+            badge.textContent = 'Loading...';
+            badge.classList.add('loading');
+
+            try {
+                const res = await authFetch('/api/session-messages/' + sessionId);
+                const data = await res.json();
+                const msgs = data.messages || [];
+                msgCache[sessionId] = { msgs, open: true };
+
+                if (msgs.length === 0) {
+                    badge.textContent = '0 msgs';
+                    listEl.innerHTML = '<div class="msg-item" style="color:#999;">No staff messages in this session</div>';
+                } else {
+                    badge.textContent = msgs.length + ' msg' + (msgs.length !== 1 ? 's' : '');
+                    listEl.innerHTML = msgs.map(m =>
+                        `<div class="msg-item"><span class="msg-time">${new Date(m.sent_at).toLocaleTimeString()}</span> ${escapeHtml(m.text || '[' + m.type + ']')}</div>`
+                    ).join('');
+                }
+                badge.classList.remove('loading');
+                listEl.classList.add('open');
+            } catch (err) {
+                badge.textContent = 'Error';
+                badge.classList.remove('loading');
+                badge.classList.add('error');
+                console.error('Failed to load messages for session ' + sessionId, err);
+            }
+        }
+
+        document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);
+        loadSessions();
+        setInterval(loadSessions, 5000);
+    </script>
+</body>
+</html>

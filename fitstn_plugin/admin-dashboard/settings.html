@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Settings</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .form-section {
+            background: #fff; padding: 24px; border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 480px;
+        }
+        .form-section h2 { margin-top: 0; color: #333; font-size: 18px; }
+        .field { margin-bottom: 16px; }
+        .field label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; font-weight: 500; }
+        .field input[type="number"] {
+            width: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;
+            font-size: 14px; text-align: center;
+        }
+        .field .hint { font-size: 12px; color: #999; margin-top: 4px; }
+        .btn { padding: 9px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; color: #fff; }
+        .btn-primary { background: #333; }
+        .btn-primary:hover { background: #555; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .msg { font-size: 13px; margin-left: 12px; display: none; }
+        .msg.success { color: #28a745; }
+        .msg.error { color: #dc3545; }
+        .actions { display: flex; align-items: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Admin Dashboard</h1>
+        <div>
+            <nav style="display:inline;">
+                <a href="/overview.html">Overview</a>
+                <a href="/dashboard.html">Sessions</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/settings.html" class="active">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+    <div class="form-section">
+        <h2>Idle Alert Thresholds</h2>
+        <div class="field">
+            <label for="warning-min">Warning after (minutes)</label>
+            <input type="number" id="warning-min" min="1" max="120" value="5">
+            <div class="hint">Agents idle longer than this will show a warning alert.</div>
+        </div>
+        <div class="field">
+            <label for="critical-min">Critical after (minutes)</label>
+            <input type="number" id="critical-min" min="1" max="120" value="10">
+            <div class="hint">Agents idle longer than this will show a critical alert with animation.</div>
+        </div>
+        <h2 style="margin-top: 24px;">Session Duration</h2>
+        <div class="field">
+            <label for="max-session-min">Max session duration (minutes)</label>
+            <input type="number" id="max-session-min" min="1" max="480" value="30">
+            <div class="hint">Alert agents and admins when a chat session exceeds this duration.</div>
+        </div>
+        <div class="actions">
+            <button class="btn btn-primary" id="save-btn">Save</button>
+            <span class="msg success" id="success-msg">Settings saved.</span>
+            <span class="msg error" id="error-msg"></span>
+        </div>
+    </div>
+    <script>
+        const token = localStorage.getItem('adminToken');
+        if (!token) { window.location.href = '/'; }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) { localStorage.removeItem('adminToken'); window.location.href = '/'; }
+                return res;
+            });
+        }
+
+        function logout() {
+            authFetch('/api/admin/logout', { method: 'POST' });
+            localStorage.removeItem('adminToken');
+            window.location.href = '/';
+        }
+
+        const warningInput = document.getElementById('warning-min');
+        const criticalInput = document.getElementById('critical-min');
+        const maxSessionInput = document.getElementById('max-session-min');
+        const saveBtn = document.getElementById('save-btn');
+        const successMsg = document.getElementById('success-msg');
+        const errorMsg = document.getElementById('error-msg');
+
+        async function loadSettings() {
+            try {
+                const res = await authFetch('/api/settings');
+                const data = await res.json();
+                if (data.idle_warning_minutes) warningInput.value = data.idle_warning_minutes;
+                if (data.idle_critical_minutes) criticalInput.value = data.idle_critical_minutes;
+                if (data.max_session_minutes) maxSessionInput.value = data.max_session_minutes;
+            } catch (err) {
+                errorMsg.textContent = 'Failed to load settings.';
+                errorMsg.style.display = 'inline';
+            }
+        }
+
+        saveBtn.addEventListener('click', async () => {
+            successMsg.style.display = 'none';
+            errorMsg.style.display = 'none';
+            saveBtn.disabled = true;
+            try {
+                const res = await authFetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        idle_warning_minutes: parseInt(warningInput.value),
+                        idle_critical_minutes: parseInt(criticalInput.value),
+                        max_session_minutes: parseInt(maxSessionInput.value),
+                    }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    successMsg.style.display = 'inline';
+                    setTimeout(() => { successMsg.style.display = 'none'; }, 3000);
+                } else {
+                    errorMsg.textContent = data.error || 'Failed to save.';
+                    errorMsg.style.display = 'inline';
+                }
+            } catch (err) {
+                errorMsg.textContent = 'Failed to save settings.';
+                errorMsg.style.display = 'inline';
+            }
+            saveBtn.disabled = false;
+        });
+
+        loadSettings();
+    </script>
+</body>
+</html>

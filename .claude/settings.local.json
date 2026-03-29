@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"supabase\\\\|rpc\\\\|API\\\\|endpoint\" /d/fitstn-flexcoach/fitstn_quality --include=*.js --include=*.json --include=*.env -i)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Salaries</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #333; color: #fff; }
+        tr:hover { background: #f9f9f9; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .form-section { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+        .form-section h2 { margin-top: 0; color: #333; font-size: 18px; }
+        .form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+        .form-row .field { flex: 1; min-width: 150px; }
+        .form-row label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .form-row input, .form-row select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        .btn { padding: 9px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; color: #fff; }
+        .btn-primary { background: #333; }
+        .btn-primary:hover { background: #555; }
+        .btn-danger { background: #dc3545; }
+        .btn-danger:hover { background: #c82333; }
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #5a6268; }
+        .btn-success { background: #28a745; }
+        .btn-success:hover { background: #218838; }
+        .btn-sm { padding: 5px 12px; font-size: 13px; }
+        .actions { display: flex; gap: 6px; }
+        .msg { padding: 10px 16px; border-radius: 4px; margin-bottom: 16px; display: none; font-size: 14px; }
+        .msg-success { background: #d4edda; color: #155724; }
+        .msg-error { background: #f8d7da; color: #721c24; }
+        .toggle-label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #333; cursor: pointer; padding-bottom: 2px; }
+        .toggle-label input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+        .section-title { font-size: 16px; color: #333; margin: 24px 0 12px 0; font-weight: bold; }
+        .hidden { display: none; }
+        .agent-select-bar { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 24px; }
+        .agent-select-bar .field { min-width: 250px; }
+        .agent-select-bar label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .agent-select-bar select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 250px; }
+        .payslip-box { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+        .payslip-box h3 { margin-top: 0; }
+        .payslip-summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+        .payslip-card { background: #f9f9f9; padding: 16px 24px; border-radius: 8px; text-align: center; min-width: 140px; }
+        .payslip-card .label { font-size: 12px; color: #777; margin-bottom: 4px; }
+        .payslip-card .value { font-size: 22px; font-weight: bold; color: #333; }
+        .payslip-card.net .value { color: #28a745; }
+        .status-active { color: #28a745; font-weight: bold; }
+        .status-inactive { color: #999; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Admin Dashboard</h1>
+        <div>
+            <nav style="display:inline;">
+                <a href="/overview.html">Overview</a>
+                <a href="/dashboard.html">Sessions</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/salaries.html" class="active">Salaries</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div id="message" class="msg"></div>
+
+    <!-- Step 1: Select Agent -->
+    <div class="agent-select-bar">
+        <div class="field">
+            <label for="agent-select">Select Agent</label>
+            <select id="agent-select" onchange="onAgentSelected()">
+                <option value="">-- Choose an agent --</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="month-select">Month</label>
+            <input type="month" id="month-select" onchange="onMonthChanged()">
+        </div>
+    </div>
+
+    <!-- Agent salary panel (hidden until agent selected) -->
+    <div id="salary-panel" class="hidden">
+
+        <!-- Salary Definition -->
+        <div class="form-section">
+            <h2>Salary Definition</h2>
+            <div class="form-row">
+                <div class="field">
+                    <label for="basic-salary">Basic Salary</label>
+                    <input type="number" id="basic-salary" placeholder="0.00" step="0.01" min="0">
+                </div>
+                <div class="field">
+                    <label for="bonus">Bonus</label>
+                    <input type="number" id="bonus" placeholder="0.00" step="0.01" min="0">
+                </div>
+                <div class="field">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="calculate-on-base" checked>
+                        Calculate on base salary only
+                    </label>
+                </div>
+                <div>
+                    <button class="btn btn-primary" onclick="saveSalary()">Save Salary</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deductions -->
+        <div class="form-section">
+            <h2>Deductions</h2>
+            <div class="form-row" style="margin-bottom: 16px;">
+                <div class="field">
+                    <label for="ded-name">Name</label>
+                    <input type="text" id="ded-name" placeholder="e.g. Tax, Insurance">
+                </div>
+                <div class="field">
+                    <label for="ded-type">Type</label>
+                    <select id="ded-type" onchange="onDedTypeChanged()">
+                        <option value="fixed">Fixed Amount</option>
+                        <option value="percentage">Percentage</option>
+                        <option value="days">Days (salary/30)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="ded-value">Value</label>
+                    <input type="number" id="ded-value" placeholder="0" step="0.01" min="0">
+                </div>
+                <div>
+                    <button class="btn btn-primary" onclick="addDeduction()">Add</button>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Value</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="deductions-body">
+                    <tr><td colspan="5" class="empty">No deductions yet.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Overtime -->
+        <div class="form-section">
+            <h2>Overtime <span style="font-size:13px; color:#777; font-weight:normal;" id="overtime-month-label"></span></h2>
+            <div class="form-row" style="margin-bottom: 16px;">
+                <div class="field">
+                    <label for="ot-type">Type</label>
+                    <select id="ot-type" onchange="onOtTypeChanged()">
+                        <option value="hours">Hours</option>
+                        <option value="days">Days (salary/30)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="ot-hours" id="ot-hours-label">Hours</label>
+                    <input type="number" id="ot-hours" placeholder="0" step="0.5" min="0">
+                </div>
+                <div class="field" id="ot-rate-field">
+                    <label for="ot-rate">Rate / Hour</label>
+                    <input type="number" id="ot-rate" placeholder="0.00" step="0.01" min="0">
+                </div>
+                <div class="field">
+                    <label for="ot-note">Note (optional)</label>
+                    <input type="text" id="ot-note" placeholder="e.g. Weekend shift">
+                </div>
+                <div>
+                    <button class="btn btn-primary" onclick="addOvertime()">Add</button>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Value</th>
+                        <th>Rate</th>
+                        <th>Total</th>
+                        <th>Note</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="overtime-body">
+                    <tr><td colspan="6" class="empty">No overtime entries for this month.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Salary Calculation Preview -->
+        <div class="payslip-box">
+            <h3>Salary Preview <span style="font-size:13px; color:#777; font-weight:normal;" id="preview-month-label"></span></h3>
+            <div id="preview-content">
+                <p style="color:#999;">Click "Calculate" to preview the salary breakdown.</p>
+            </div>
+            <div style="margin-top: 16px; display: flex; gap: 12px;">
+                <button class="btn btn-primary" onclick="calculatePreview()">Calculate</button>
+                <button class="btn btn-success" onclick="generatePayslip()">Generate Payslip</button>
+            </div>
+        </div>
+
+        <!-- Payslip History -->
+        <div class="form-section">
+            <h2>Payslip History</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Month</th>
+                        <th>Basic</th>
+                        <th>Bonus</th>
+                        <th>Overtime</th>
+                        <th>Deductions</th>
+                        <th>Net Salary</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="payslips-body">
+                    <tr><td colspan="7" class="empty">No payslips generated yet.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('adminToken');
+        if (!token) { window.location.href = '/'; }
+
+        let selectedAgentId = null;
+
+        function getSelectedMonth() {
+            return document.getElementById('month-select').value;
+        }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) { localStorage.removeItem('adminToken'); window.location.href = '/'; }
+                return res;
+            });
+        }
+
+        function logout() {
+            authFetch('/api/admin/logout', { method: 'POST' });
+            localStorage.removeItem('adminToken');
+            window.location.href = '/';
+        }
+
+        function showMsg(text, type) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = 'msg msg-' + type;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 4000);
+        }
+
+        function formatCurrency(amount) {
+            return parseFloat(amount).toFixed(2);
+        }
+
+        // =====================
+        // INIT
+        // =====================
+
+        async function loadAgents() {
+            try {
+                const res = await authFetch('/api/agents');
+                const agents = await res.json();
+                const select = document.getElementById('agent-select');
+                agents.forEach(agent => {
+                    const option = document.createElement('option');
+                    option.value = agent.id;
+                    option.textContent = agent.name ? `${agent.name} (${agent.email})` : agent.email;
+                    select.appendChild(option);
+                });
+            } catch (err) {
+                showMsg('Failed to load agents', 'error');
+            }
+        }
+
+        function setDefaultMonth() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('month-select').value = `${year}-${month}`;
+        }
+
+        // =====================
+        // TYPE TOGGLE HELPERS
+        // =====================
+
+        function onDedTypeChanged() {
+            const type = document.getElementById('ded-type').value;
+            const valueInput = document.getElementById('ded-value');
+            if (type === 'days') {
+                valueInput.placeholder = 'e.g. 0.5, 1, 2';
+                valueInput.step = '0.5';
+            } else if (type === 'percentage') {
+                valueInput.placeholder = 'e.g. 10';
+                valueInput.step = '0.01';
+            } else {
+                valueInput.placeholder = '0';
+                valueInput.step = '0.01';
+            }
+        }
+
+        function onOtTypeChanged() {
+            const type = document.getElementById('ot-type').value;
+            const rateField = document.getElementById('ot-rate-field');
+            const hoursLabel = document.getElementById('ot-hours-label');
+            if (type === 'days') {
+                rateField.style.display = 'none';
+                hoursLabel.textContent = 'Days';
+                document.getElementById('ot-hours').placeholder = 'e.g. 0.5, 1, 2';
+                document.getElementById('ot-hours').step = '0.5';
+            } else {
+                rateField.style.display = '';
+                hoursLabel.textContent = 'Hours';
+                document.getElementById('ot-hours').placeholder = '0';
+                document.getElementById('ot-hours').step = '0.5';
+            }
+        }
+
+        // =====================
+        // AGENT SELECTION
+        // =====================
+
+        function onAgentSelected() {
+            const agentId = document.getElementById('agent-select').value;
+            if (!agentId) {
+                selectedAgentId = null;
+                document.getElementById('salary-panel').classList.add('hidden');
+                return;
+            }
+            selectedAgentId = agentId;
+            document.getElementById('salary-panel').classList.remove('hidden');
+            loadSalaryDefinition();
+            loadDeductions();
+            loadOvertime();
+            loadPayslips();
+            resetPreview();
+        }
+
+        function onMonthChanged() {
+            if (!selectedAgentId) return;
+            loadOvertime();
+            resetPreview();
+        }
+
+        function resetPreview() {
+            const month = getSelectedMonth();
+            document.getElementById('preview-month-label').textContent = month ? `(${month})` : '';
+            document.getElementById('overtime-month-label').textContent = month ? `(${month})` : '';
+            document.getElementById('preview-content').innerHTML = '<p style="color:#999;">Click "Calculate" to preview the salary breakdown.</p>';
+        }
+
+        // =====================
+        // SALARY DEFINITION
+        // =====================
+
+        async function loadSalaryDefinition() {
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}`);
+                const salary = await res.json();
+                if (salary) {
+                    document.getElementById('basic-salary').value = salary.basic_salary;
+                    document.getElementById('bonus').value = salary.bonus;
+                    document.getElementById('calculate-on-base').checked = salary.calculate_on_base;
+                } else {
+                    document.getElementById('basic-salary').value = '';
+                    document.getElementById('bonus').value = '';
+                    document.getElementById('calculate-on-base').checked = true;
+                }
+            } catch (err) {
+                showMsg('Failed to load salary definition', 'error');
+            }
+        }
+
+        async function saveSalary() {
+            const basicSalary = document.getElementById('basic-salary').value;
+            if (!basicSalary) { showMsg('Basic salary is required', 'error'); return; }
+
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        basic_salary: parseFloat(basicSalary),
+                        bonus: parseFloat(document.getElementById('bonus').value) || 0,
+                        calculate_on_base: document.getElementById('calculate-on-base').checked
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showMsg('Salary saved successfully', 'success');
+            } catch (err) {
+                showMsg(err.message || 'Failed to save salary', 'error');
+            }
+        }
+
+        // =====================
+        // DEDUCTIONS
+        // =====================
+
+        async function loadDeductions() {
+            const tbody = document.getElementById('deductions-body');
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/deductions`);
+                const deductions = await res.json();
+                if (deductions.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty">No deductions yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = deductions.map(d => `
+                    <tr>
+                        <td>${d.name}</td>
+                        <td>${d.type === 'percentage' ? 'Percentage' : d.type === 'days' ? 'Days' : 'Fixed'}</td>
+                        <td>${d.type === 'percentage' ? d.value + '%' : d.type === 'days' ? d.value + ' day(s)' : formatCurrency(d.value)}</td>
+                        <td>
+                            <span class="${d.is_active ? 'status-active' : 'status-inactive'}">
+                                ${d.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                        </td>
+                        <td class="actions">
+                            <button class="btn ${d.is_active ? 'btn-secondary' : 'btn-success'} btn-sm" onclick="toggleDeduction(${d.id}, ${!d.is_active})">
+                                ${d.is_active ? 'Disable' : 'Enable'}
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteDeduction(${d.id})">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty">Failed to load deductions.</td></tr>';
+            }
+        }
+
+        async function addDeduction() {
+            const name = document.getElementById('ded-name').value.trim();
+            const type = document.getElementById('ded-type').value;
+            const value = document.getElementById('ded-value').value;
+
+            if (!name || !value) { showMsg('Deduction name and value are required', 'error'); return; }
+
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/deductions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, type, value: parseFloat(value) })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showMsg('Deduction added', 'success');
+                document.getElementById('ded-name').value = '';
+                document.getElementById('ded-value').value = '';
+                loadDeductions();
+            } catch (err) {
+                showMsg(err.message || 'Failed to add deduction', 'error');
+            }
+        }
+
+        async function toggleDeduction(deductionId, isActive) {
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/deductions/${deductionId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: isActive })
+                });
+                if (!res.ok) throw new Error('Failed to update deduction');
+                loadDeductions();
+            } catch (err) {
+                showMsg(err.message, 'error');
+            }
+        }
+
+        async function deleteDeduction(deductionId) {
+            if (!confirm('Delete this deduction?')) return;
+            try {
+                await authFetch(`/api/salaries/${selectedAgentId}/deductions/${deductionId}`, { method: 'DELETE' });
+                showMsg('Deduction deleted', 'success');
+                loadDeductions();
+            } catch (err) {
+                showMsg('Failed to delete deduction', 'error');
+            }
+        }
+
+        // =====================
+        // OVERTIME
+        // =====================
+
+        async function loadOvertime() {
+            const tbody = document.getElementById('overtime-body');
+            const month = getSelectedMonth();
+            if (!month) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty">Select a month to view overtime.</td></tr>';
+                return;
+            }
+            document.getElementById('overtime-month-label').textContent = `(${month})`;
+
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/overtime?month=${month}`);
+                const entries = await res.json();
+                if (entries.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty">No overtime entries for this month.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = entries.map(e => {
+                    const entryType = e.type || 'hours';
+                    const isDay = entryType === 'days';
+                    return `
+                    <tr>
+                        <td>${isDay ? 'Days' : 'Hours'}</td>
+                        <td>${e.hours}${isDay ? ' day(s)' : ' hrs'}</td>
+                        <td>${isDay ? 'salary/30' : formatCurrency(e.rate_per_hour) + '/hr'}</td>
+                        <td>${isDay ? '-' : formatCurrency(e.hours * e.rate_per_hour)}</td>
+                        <td>${e.note || '-'}</td>
+                        <td class="actions">
+                            <button class="btn btn-danger btn-sm" onclick="deleteOvertime(${e.id})">Delete</button>
+                        </td>
+                    </tr>`;
+                }).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty">Failed to load overtime.</td></tr>';
+            }
+        }
+
+        async function addOvertime() {
+            const month = getSelectedMonth();
+            if (!month) { showMsg('Select a month first', 'error'); return; }
+
+            const type = document.getElementById('ot-type').value;
+            const hours = document.getElementById('ot-hours').value;
+            const ratePerHour = document.getElementById('ot-rate').value;
+            const note = document.getElementById('ot-note').value.trim();
+
+            if (!hours) { showMsg(type === 'days' ? 'Days value is required' : 'Hours value is required', 'error'); return; }
+            if (type === 'hours' && !ratePerHour) { showMsg('Rate per hour is required', 'error'); return; }
+
+            const body = { month, type, hours: parseFloat(hours), note: note || null };
+            if (type === 'hours') {
+                body.rate_per_hour = parseFloat(ratePerHour);
+            }
+
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/overtime`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showMsg('Overtime entry added', 'success');
+                document.getElementById('ot-hours').value = '';
+                document.getElementById('ot-rate').value = '';
+                document.getElementById('ot-note').value = '';
+                loadOvertime();
+            } catch (err) {
+                showMsg(err.message || 'Failed to add overtime', 'error');
+            }
+        }
+
+        async function deleteOvertime(overtimeId) {
+            if (!confirm('Delete this overtime entry?')) return;
+            try {
+                await authFetch(`/api/salaries/${selectedAgentId}/overtime/${overtimeId}`, { method: 'DELETE' });
+                showMsg('Overtime entry deleted', 'success');
+                loadOvertime();
+            } catch (err) {
+                showMsg('Failed to delete overtime', 'error');
+            }
+        }
+
+        // =====================
+        // SALARY PREVIEW
+        // =====================
+
+        async function calculatePreview() {
+            const month = getSelectedMonth();
+            if (!month) { showMsg('Select a month first', 'error'); return; }
+
+            document.getElementById('preview-month-label').textContent = `(${month})`;
+
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/calculate/${month}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                renderPreview(data);
+            } catch (err) {
+                showMsg(err.message || 'Failed to calculate salary', 'error');
+            }
+        }
+
+        function renderPreview(data) {
+            const calculationModeText = data.calculate_on_base
+                ? 'Calculated on base salary only'
+                : 'Calculated on total salary (basic + bonus)';
+
+            let deductionsHtml = '';
+            if (data.deductions.length > 0) {
+                deductionsHtml = '<table style="width:100%; margin-top:12px;">'
+                    + '<thead><tr><th>Deduction</th><th>Type</th><th>Value</th><th>Amount</th></tr></thead><tbody>'
+                    + data.deductions.map(d => {
+                        let typeLabel = d.type === 'percentage' ? 'Percentage' : d.type === 'days' ? 'Days' : 'Fixed';
+                        let valueLabel = d.type === 'percentage' ? d.value + '%' : d.type === 'days' ? d.value + ' day(s) x ' + formatCurrency(d.day_price) + '/day' : formatCurrency(d.value);
+                        return `
+                        <tr>
+                            <td>${d.name}</td>
+                            <td>${typeLabel}</td>
+                            <td>${valueLabel}</td>
+                            <td>${formatCurrency(d.calculated_amount)}</td>
+                        </tr>`;
+                    }).join('')
+                    + '</tbody></table>';
+            }
+
+            let overtimeHtml = '';
+            if (data.overtime.length > 0) {
+                overtimeHtml = '<table style="width:100%; margin-top:12px;">'
+                    + '<thead><tr><th>Type</th><th>Value</th><th>Rate</th><th>Amount</th><th>Note</th></tr></thead><tbody>'
+                    + data.overtime.map(o => {
+                        const isDay = o.type === 'days';
+                        return `
+                        <tr>
+                            <td>${isDay ? 'Days' : 'Hours'}</td>
+                            <td>${o.value}${isDay ? ' day(s)' : ' hrs'}</td>
+                            <td>${isDay ? formatCurrency(o.day_price) + '/day' : formatCurrency(o.rate_per_hour) + '/hr'}</td>
+                            <td>${formatCurrency(o.amount)}</td>
+                            <td>${o.note || '-'}</td>
+                        </tr>`;
+                    }).join('')
+                    + '</tbody></table>';
+            }
+
+            document.getElementById('preview-content').innerHTML = `
+                <p style="font-size:13px; color:#777; margin-top:0;">${calculationModeText} &mdash; Day price: <strong>${formatCurrency(data.day_price)}</strong> (${formatCurrency(data.calculation_base)} / 30)</p>
+                <div class="payslip-summary">
+                    <div class="payslip-card">
+                        <div class="label">Basic Salary</div>
+                        <div class="value">${formatCurrency(data.basic_salary)}</div>
+                    </div>
+                    <div class="payslip-card">
+                        <div class="label">Bonus</div>
+                        <div class="value">${formatCurrency(data.bonus)}</div>
+                    </div>
+                    <div class="payslip-card">
+                        <div class="label">Overtime</div>
+                        <div class="value">+${formatCurrency(data.total_overtime)}</div>
+                    </div>
+                    <div class="payslip-card">
+                        <div class="label">Deductions</div>
+                        <div class="value" style="color:#dc3545;">-${formatCurrency(data.total_deductions)}</div>
+                    </div>
+                    <div class="payslip-card net">
+                        <div class="label">Net Salary</div>
+                        <div class="value">${formatCurrency(data.net_salary)}</div>
+                    </div>
+                </div>
+                ${deductionsHtml ? '<p class="section-title">Deductions Breakdown</p>' + deductionsHtml : ''}
+                ${overtimeHtml ? '<p class="section-title">Overtime Breakdown</p>' + overtimeHtml : ''}
+            `;
+        }
+
+        // =====================
+        // PAYSLIPS
+        // =====================
+
+        async function generatePayslip() {
+            const month = getSelectedMonth();
+            if (!month) { showMsg('Select a month first', 'error'); return; }
+            if (!confirm(`Generate payslip for ${month}? This will save a snapshot of the current salary calculation.`)) return;
+
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/payslip/${month}`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showMsg('Payslip generated successfully', 'success');
+                loadPayslips();
+            } catch (err) {
+                showMsg(err.message || 'Failed to generate payslip', 'error');
+            }
+        }
+
+        async function loadPayslips() {
+            const tbody = document.getElementById('payslips-body');
+            try {
+                const res = await authFetch(`/api/salaries/${selectedAgentId}/payslips`);
+                const records = await res.json();
+                if (records.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty">No payslips generated yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = records.map(r => `
+                    <tr>
+                        <td>${r.month}</td>
+                        <td>${formatCurrency(r.basic_salary)}</td>
+                        <td>${formatCurrency(r.bonus)}</td>
+                        <td>+${formatCurrency(r.total_overtime)}</td>
+                        <td style="color:#dc3545;">-${formatCurrency(r.total_deductions)}</td>
+                        <td style="color:#28a745; font-weight:bold;">${formatCurrency(r.net_salary)}</td>
+                        <td class="actions">
+                            <button class="btn btn-danger btn-sm" onclick="deletePayslip(${r.id})">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty">Failed to load payslips.</td></tr>';
+            }
+        }
+
+        async function deletePayslip(recordId) {
+            if (!confirm('Delete this payslip record?')) return;
+            try {
+                await authFetch(`/api/salaries/${selectedAgentId}/payslips/${recordId}`, { method: 'DELETE' });
+                showMsg('Payslip deleted', 'success');
+                loadPayslips();
+            } catch (err) {
+                showMsg('Failed to delete payslip', 'error');
+            }
+        }
+
+        // =====================
+        // INIT
+        // =====================
+
+        setDefaultMonth();
+        loadAgents();
+    </script>
+</body>
+</html>
