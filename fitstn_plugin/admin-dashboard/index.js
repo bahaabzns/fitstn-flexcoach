@@ -494,6 +494,19 @@ app.listen(PORT, async () => {
             )
         `;
 
+        await sql`
+            CREATE TABLE IF NOT EXISTS sessions (
+                id SERIAL PRIMARY KEY,
+                chat_name VARCHAR(255),
+                chat_preview TEXT,
+                agent_id INTEGER REFERENCES agents(id),
+                clicked_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                ended_at TIMESTAMP,
+                messages JSONB DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `;
+
         // Add type column to salary_overtime if it doesn't exist
         await sql`ALTER TABLE salary_overtime ADD COLUMN IF NOT EXISTS type VARCHAR(10) NOT NULL DEFAULT 'hours'`;
 
