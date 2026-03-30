@@ -1,8 +1,8 @@
 const CHATS_SELECTOR =
   "html body div main div div:first-child div div:last-child div div div div[class='flex items-start gap-3 p-3 cursor-pointer transition-colors hover:bg-muted/50']";
 
-const API_URL = "http://localhost:3000/api/chat-click";
-const API_BASE = "http://localhost:3000";
+const API_URL = "https://fitstn-flexcoach.onrender.com/api/chat-click";
+const API_BASE = "https://fitstn-flexcoach.onrender.com";
 
 let currentToken = null;
 let observer = null;

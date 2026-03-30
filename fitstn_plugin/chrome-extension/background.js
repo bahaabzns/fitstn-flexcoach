@@ -12,7 +12,7 @@ function getToken() {
 async function closeSession() {
     const token = await getToken();
     if (!token) return;
-    fetch("http://localhost:3000/api/close-session", {
+    fetch("https://fitstn-flexcoach.onrender.com/api/close-session", {
         method: "POST",
         headers: { Authorization: "Bearer " + token },
     }).catch(() => {});

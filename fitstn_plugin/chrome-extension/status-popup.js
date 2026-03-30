@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:3000";
+const API_BASE = "https://fitstn-flexcoach.onrender.com";
 const statusBadge = document.getElementById("status-badge");
 const statusDetail = document.getElementById("status-detail");
 const statusContainer = document.getElementById("status-container");

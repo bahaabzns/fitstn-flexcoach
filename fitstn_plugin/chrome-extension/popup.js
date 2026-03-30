@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:3000";
+const API_BASE = "https://fitstn-flexcoach.onrender.com";
 
 const loginSection = document.getElementById("login-section");
 const signedInSection = document.getElementById("signed-in-section");
