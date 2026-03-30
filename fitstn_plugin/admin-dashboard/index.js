@@ -46,6 +46,7 @@ const agentRoutes = require("./routes/agents")(sql, requireAdmin);
 const shiftRoutes = require("./routes/shifts")(sql, requireAgent);
 const salaryRoutes = require("./routes/salaries")(sql, requireAdmin);
 const agentOverviewRoutes = require("./routes/agent-overview")(sql);
+const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
 
 app.use(cors({ origin: "*", allowedHeaders: ["Content-Type", "Authorization"] }));
 app.use(express.json());
@@ -59,6 +60,7 @@ app.use("/api/agents", agentRoutes);
 app.use("/api/agent", shiftRoutes);
 app.use("/api/salaries", salaryRoutes);
 app.use("/api/agent-overview", agentOverviewRoutes);
+app.use("/api", activityEventRoutes);
 
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "login.html"));
@@ -290,11 +292,26 @@ app.post("/api/chat-click", requireAgent, async (req, res) => {
         `;
         console.log("Closed sessions:", updated.map(r => r.id));
 
+        // Log session_ended events for auto-closed previous sessions
+        for (const closed of updated) {
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
+                VALUES (${req.user.id}, 'session_ended', ${closed.id}, '{"reason": "new_chat_opened"}')
+            `;
+        }
+
         const result = await sql`
             INSERT INTO sessions (chat_name, chat_preview, agent_id)
             VALUES (${chatName || null}, ${chatPreview || null}, ${req.user.id})
             RETURNING *
         `;
+
+        // Log session_started event
+        await sql`
+            INSERT INTO activity_events (agent_id, event_type, session_id)
+            VALUES (${req.user.id}, 'session_started', ${result[0].id})
+        `;
+
         res.json({ success: true, data: result[0] });
     } catch (err) {
         console.error("POST /api/chat-click error:", err.message);
@@ -315,6 +332,26 @@ app.post("/api/session-message", requireAgent, async (req, res) => {
             RETURNING id, jsonb_array_length(messages) as message_count
         `;
         if (updated.length === 0) return res.status(404).json({ error: "No active session" });
+
+        // Calculate response time and log message_sent event
+        const sessionInfo = await sql`
+            SELECT clicked_at, messages FROM sessions WHERE id = ${updated[0].id}
+        `;
+        const messages = sessionInfo[0].messages || [];
+        const messageCount = messages.length;
+        let responseTimeSeconds = 0;
+        if (messageCount <= 1) {
+            responseTimeSeconds = Math.round((Date.now() - new Date(sessionInfo[0].clicked_at).getTime()) / 1000);
+        } else {
+            const previousMessage = messages[messageCount - 2];
+            responseTimeSeconds = Math.round((Date.now() - new Date(previousMessage.sent_at).getTime()) / 1000);
+        }
+
+        await sql`
+            INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
+            VALUES (${req.user.id}, 'message_sent', ${updated[0].id}, ${JSON.stringify({ response_time_seconds: responseTimeSeconds })})
+        `;
+
         res.json({ success: true, session_id: updated[0].id, message_count: updated[0].message_count });
     } catch (err) {
         console.error("POST /api/session-message error:", err.message);
@@ -335,28 +372,39 @@ app.get("/api/settings", requireAdmin, async (req, res) => {
 
 app.put("/api/settings", requireAdmin, async (req, res) => {
     try {
-        const { idle_warning_minutes, idle_critical_minutes, max_session_minutes } = req.body;
+        const { idle_warning_minutes, idle_critical_minutes, max_session_minutes, idle_inside_session_minutes, session_timeout_minutes } = req.body;
         const warning = parseInt(idle_warning_minutes);
         const critical = parseInt(idle_critical_minutes);
         const maxSession = parseInt(max_session_minutes);
+        const idleInSession = parseInt(idle_inside_session_minutes);
+        const sessionTimeout = parseInt(session_timeout_minutes);
         if (!warning || !critical || warning < 1 || critical < 1 || warning >= critical) {
             return res.status(400).json({ error: "Invalid values. Warning must be less than critical, both must be >= 1." });
         }
         if (!maxSession || maxSession < 1) {
             return res.status(400).json({ error: "Max session duration must be >= 1 minute." });
         }
-        await sql`
-            INSERT INTO settings (key, value, updated_at) VALUES ('idle_warning_minutes', ${String(warning)}, NOW())
-            ON CONFLICT (key) DO UPDATE SET value = ${String(warning)}, updated_at = NOW()
-        `;
-        await sql`
-            INSERT INTO settings (key, value, updated_at) VALUES ('idle_critical_minutes', ${String(critical)}, NOW())
-            ON CONFLICT (key) DO UPDATE SET value = ${String(critical)}, updated_at = NOW()
-        `;
-        await sql`
-            INSERT INTO settings (key, value, updated_at) VALUES ('max_session_minutes', ${String(maxSession)}, NOW())
-            ON CONFLICT (key) DO UPDATE SET value = ${String(maxSession)}, updated_at = NOW()
-        `;
+        if (!idleInSession || idleInSession < 1) {
+            return res.status(400).json({ error: "Idle inside session must be >= 1 minute." });
+        }
+        if (!sessionTimeout || sessionTimeout < 1) {
+            return res.status(400).json({ error: "Session timeout must be >= 1 minute." });
+        }
+
+        const settingsToSave = {
+            idle_warning_minutes: String(warning),
+            idle_critical_minutes: String(critical),
+            max_session_minutes: String(maxSession),
+            idle_inside_session_minutes: String(idleInSession),
+            session_timeout_minutes: String(sessionTimeout),
+        };
+        for (const [key, value] of Object.entries(settingsToSave)) {
+            await sql`
+                INSERT INTO settings (key, value, updated_at) VALUES (${key}, ${value}, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = ${value}, updated_at = NOW()
+            `;
+        }
+
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: "Failed to save settings", details: err.message });
@@ -370,6 +418,14 @@ app.post("/api/close-session", requireAgent, async (req, res) => {
             WHERE ended_at IS NULL AND agent_id = ${req.user.id}
             RETURNING id
         `;
+        // Log session_ended events
+        for (const closed of updated) {
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
+                VALUES (${req.user.id}, 'session_ended', ${closed.id}, '{"reason": "manual_close"}')
+            `;
+        }
+
         console.log("Tab closed - closed sessions:", updated.map(r => r.id));
         res.json({ success: true, closed: updated.length });
     } catch (err) {
@@ -434,7 +490,12 @@ app.listen(PORT, async () => {
         // Seed default settings
         await sql`
             INSERT INTO settings (key, value)
-            VALUES ('idle_warning_minutes', '5'), ('idle_critical_minutes', '10'), ('max_session_minutes', '30')
+            VALUES
+                ('idle_warning_minutes', '5'),
+                ('idle_critical_minutes', '10'),
+                ('max_session_minutes', '30'),
+                ('idle_inside_session_minutes', '2'),
+                ('session_timeout_minutes', '10')
             ON CONFLICT (key) DO NOTHING
         `;
 
@@ -507,6 +568,23 @@ app.listen(PORT, async () => {
             )
         `;
 
+        // Activity events — granular per-action tracking
+        await sql`
+            CREATE TABLE IF NOT EXISTS activity_events (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER NOT NULL REFERENCES agents(id),
+                event_type VARCHAR(30) NOT NULL,
+                session_id INTEGER REFERENCES sessions(id),
+                shift_id INTEGER REFERENCES shifts(id),
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_activity_events_agent_created
+            ON activity_events (agent_id, created_at DESC)
+        `;
+
         // Add type column to salary_overtime if it doesn't exist
         await sql`ALTER TABLE salary_overtime ADD COLUMN IF NOT EXISTS type VARCHAR(10) NOT NULL DEFAULT 'hours'`;
 
@@ -540,12 +618,53 @@ app.listen(PORT, async () => {
                 SELECT 1 FROM sessions s2 WHERE s2.clicked_at > s.clicked_at
             )
         `;
+        // Start periodic session timeout check (every 60 seconds)
+        const SESSION_TIMEOUT_CHECK_MS = 60 * 1000;
+        setInterval(checkSessionTimeouts, SESSION_TIMEOUT_CHECK_MS);
+
         console.log("Database schema ready.");
     } catch (err) {
         console.error("Failed to connect to database:", err.message);
     }
     console.log(`Server running on http://localhost:${PORT}`);
 });
+
+async function checkSessionTimeouts() {
+    try {
+        const timeoutSetting = await sql`
+            SELECT value FROM settings WHERE key = 'session_timeout_minutes'
+        `;
+        const timeoutMinutes = parseInt(timeoutSetting[0]?.value) || 10;
+
+        // Find sessions with no activity past the timeout threshold
+        const staleSessions = await sql`
+            SELECT s.id, s.agent_id
+            FROM sessions s
+            WHERE s.ended_at IS NULL
+            AND (
+                CASE
+                    WHEN jsonb_array_length(COALESCE(s.messages, '[]'::jsonb)) > 0
+                    THEN (s.messages->-1->>'sent_at')::timestamp < NOW() - make_interval(mins => ${timeoutMinutes})
+                    ELSE s.clicked_at < NOW() - make_interval(mins => ${timeoutMinutes})
+                END
+            )
+        `;
+
+        for (const session of staleSessions) {
+            await sql`UPDATE sessions SET ended_at = NOW() WHERE id = ${session.id}`;
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
+                VALUES (${session.agent_id}, 'session_ended', ${session.id}, '{"reason": "auto_timeout"}')
+            `;
+        }
+
+        if (staleSessions.length > 0) {
+            console.log(`Auto-closed ${staleSessions.length} timed-out session(s)`);
+        }
+    } catch (err) {
+        console.error("Session timeout check failed:", err.message);
+    }
+}
 
 function formatLocalDate(d) {
     const year = d.getFullYear();

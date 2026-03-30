@@ -202,6 +202,21 @@ module.exports = function (sql) {
                 idle_seconds: Math.max(0, sh.duration_seconds - sh.active_seconds)
             }));
 
+            // Response time metrics from activity events
+            const responseTimeData = await sql`
+                SELECT
+                    COALESCE(AVG((metadata->>'response_time_seconds')::numeric), 0)::int AS avg_response_seconds,
+                    COALESCE(MIN((metadata->>'response_time_seconds')::numeric), 0)::int AS min_response_seconds,
+                    COALESCE(MAX((metadata->>'response_time_seconds')::numeric), 0)::int AS max_response_seconds,
+                    COUNT(*)::int AS total_messages_tracked
+                FROM activity_events
+                WHERE agent_id = ${agentId}
+                    AND event_type = 'message_sent'
+                    AND created_at >= ${startDate}::date
+                    AND created_at < ${endDate}::date + INTERVAL '1 day'
+                    AND metadata->>'response_time_seconds' IS NOT NULL
+            `;
+
             res.json({
                 agent: agentRows[0],
                 period: { type: period, start: startDate, end: endDate },
@@ -215,7 +230,10 @@ module.exports = function (sql) {
                     productivity_percentage: productivityPercentage,
                     average_session_seconds: averageSessionSeconds,
                     average_messages_per_session: averageMessagesPerSession,
-                    total_messages: totalMessages
+                    total_messages: totalMessages,
+                    average_response_seconds: responseTimeData[0].avg_response_seconds,
+                    min_response_seconds: responseTimeData[0].min_response_seconds,
+                    max_response_seconds: responseTimeData[0].max_response_seconds,
                 },
                 daily_breakdown: dailyBreakdown,
                 sessions: sessionsList,

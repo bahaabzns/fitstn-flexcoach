@@ -17,6 +17,12 @@ module.exports = function (sql, requireAgent) {
                 VALUES (${req.user.id}, NOW())
                 RETURNING *
             `;
+
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, shift_id)
+                VALUES (${req.user.id}, 'shift_started', ${result[0].id})
+            `;
+
             res.status(201).json({ success: true, shift: result[0] });
         } catch (err) {
             res.status(500).json({ error: "Failed to start shift", details: err.message });
@@ -33,6 +39,15 @@ module.exports = function (sql, requireAgent) {
             if (result.length === 0) {
                 return res.status(400).json({ error: "No active shift" });
             }
+
+            const shiftDurationSeconds = Math.round(
+                (new Date(result[0].shift_ended_at) - new Date(result[0].shift_started_at)) / 1000
+            );
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
+                VALUES (${req.user.id}, 'shift_ended', ${result[0].id}, ${JSON.stringify({ duration_seconds: shiftDurationSeconds })})
+            `;
+
             res.json({ success: true, shift: result[0] });
         } catch (err) {
             res.status(500).json({ error: "Failed to end shift", details: err.message });
@@ -115,7 +130,7 @@ module.exports = function (sql, requireAgent) {
 
     router.get("/settings", requireAgent, async (req, res) => {
         try {
-            const rows = await sql`SELECT key, value FROM settings WHERE key = 'max_session_minutes'`;
+            const rows = await sql`SELECT key, value FROM settings WHERE key IN ('max_session_minutes', 'idle_inside_session_minutes', 'session_timeout_minutes')`;
             const settings = {};
             for (const row of rows) settings[row.key] = row.value;
             res.json(settings);

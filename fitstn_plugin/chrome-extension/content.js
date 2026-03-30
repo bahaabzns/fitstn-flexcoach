@@ -13,6 +13,18 @@ let statusInterval = null;
 let messageInterceptorAttached = false;
 let currentStatus = null;
 
+// Idle detection and activity tracking
+const IDLE_CHECK_INTERVAL_MS = 10000;
+const MOUSE_DEBOUNCE_MS = 1000;
+let idleThresholdMs = 2 * 60 * 1000; // default 2 min, updated from server
+let sessionTimeoutMs = 10 * 60 * 1000; // default 10 min, updated from server
+let lastActivityTimestamp = Date.now();
+let isCurrentlyIdle = false;
+let idleSinceTimestamp = null;
+let idleCheckTimer = null;
+let currentSessionId = null;
+let mouseMoveDebounceTimer = null;
+
 const isChatPage = location.pathname.startsWith("/dashboard/chat");
 
 // Native browser confirmation on tab close / reload — only on chat pages, only if signed in and on shift
@@ -68,6 +80,109 @@ function closeSessionViaApi() {
         headers: { Authorization: "Bearer " + currentToken },
     }).catch(() => {});
 }
+
+/* ───────── Activity Event Helper ───────── */
+
+function postActivityEvent(eventType, extraData = {}) {
+    if (!currentToken) return;
+    fetch(API_BASE + "/api/activity-event", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + currentToken,
+        },
+        body: JSON.stringify({ event_type: eventType, ...extraData }),
+    }).catch(() => {});
+}
+
+/* ───────── Idle Detection (Inside Sessions) ───────── */
+
+function resetActivityTimestamp() {
+    lastActivityTimestamp = Date.now();
+    if (isCurrentlyIdle) {
+        isCurrentlyIdle = false;
+        idleSinceTimestamp = null;
+        postActivityEvent("idle_resumed", { session_id: currentSessionId });
+    }
+}
+
+function onMouseMove() {
+    if (mouseMoveDebounceTimer) return;
+    mouseMoveDebounceTimer = setTimeout(() => { mouseMoveDebounceTimer = null; }, MOUSE_DEBOUNCE_MS);
+    resetActivityTimestamp();
+}
+
+function startIdleDetection() {
+    stopIdleDetection();
+    lastActivityTimestamp = Date.now();
+    isCurrentlyIdle = false;
+    idleSinceTimestamp = null;
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("keydown", resetActivityTimestamp);
+    document.addEventListener("click", resetActivityTimestamp);
+
+    idleCheckTimer = setInterval(checkIdleState, IDLE_CHECK_INTERVAL_MS);
+}
+
+function stopIdleDetection() {
+    if (idleCheckTimer) { clearInterval(idleCheckTimer); idleCheckTimer = null; }
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("keydown", resetActivityTimestamp);
+    document.removeEventListener("click", resetActivityTimestamp);
+    isCurrentlyIdle = false;
+    idleSinceTimestamp = null;
+}
+
+function checkIdleState() {
+    const idleDuration = Date.now() - lastActivityTimestamp;
+
+    // Check session auto-timeout (client-side)
+    if (isCurrentlyIdle && idleSinceTimestamp && (Date.now() - idleSinceTimestamp) >= sessionTimeoutMs) {
+        autoCloseSessionDueToTimeout();
+        return;
+    }
+
+    // Check idle threshold
+    if (!isCurrentlyIdle && idleDuration >= idleThresholdMs) {
+        isCurrentlyIdle = true;
+        idleSinceTimestamp = Date.now();
+        postActivityEvent("idle_started", { session_id: currentSessionId });
+    }
+}
+
+function autoCloseSessionDueToTimeout() {
+    closeSessionViaApi();
+    hideSessionPopup();
+    stopIdleDetection();
+    currentSessionId = null;
+    showTimeoutNotification();
+}
+
+function showTimeoutNotification() {
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        background: #dc3545; color: #fff; padding: 12px 24px; border-radius: 8px;
+        font-family: Arial, sans-serif; font-size: 14px; z-index: 99999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    `;
+    toast.textContent = "Session auto-closed due to inactivity";
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+}
+
+/* ───────── Tab Visibility Tracking ───────── */
+
+document.addEventListener("visibilitychange", () => {
+    if (!currentToken) return;
+    if (document.hidden) {
+        postActivityEvent("tab_focus_lost", { session_id: currentSessionId });
+    } else {
+        postActivityEvent("tab_focus_gained", { session_id: currentSessionId });
+        resetActivityTimestamp();
+    }
+});
 
 /* ───────── Agent Status Badge (top-right corner) ───────── */
 
@@ -244,6 +359,12 @@ function fetchMaxSessionThreshold() {
             if (data.max_session_minutes) {
                 maxSessionSeconds = parseInt(data.max_session_minutes) * 60;
             }
+            if (data.idle_inside_session_minutes) {
+                idleThresholdMs = parseInt(data.idle_inside_session_minutes) * 60 * 1000;
+            }
+            if (data.session_timeout_minutes) {
+                sessionTimeoutMs = parseInt(data.session_timeout_minutes) * 60 * 1000;
+            }
         })
         .catch(() => {});
 }
@@ -297,6 +418,8 @@ function showSessionPopup() {
 
 function hideSessionPopup() {
     if (sessionTimer) { clearInterval(sessionTimer); sessionTimer = null; }
+    stopIdleDetection();
+    currentSessionId = null;
     const popup = document.getElementById("fc-session-popup");
     if (popup) { popup.style.opacity = "0"; setTimeout(() => { popup.style.display = "none"; }, 300); }
 }
@@ -326,7 +449,11 @@ function attachClickHandlers() {
                     body: JSON.stringify({ chatName, chatPreview }),
                 })
                     .then((res) => res.json())
-                    .then((data) => console.log("Chat click saved:", data))
+                    .then((data) => {
+                        console.log("Chat click saved:", data);
+                        currentSessionId = data.data?.id || null;
+                        startIdleDetection();
+                    })
                     .catch((err) => console.error("Failed to save chat click:", err));
             });
             chat.dataset.handlerAttached = "true";

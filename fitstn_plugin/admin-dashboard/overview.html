@@ -96,6 +96,31 @@
 
         .period-label { font-size: 13px; color: #777; margin-bottom: 16px; }
 
+        /* Activity feed */
+        .feed-container {
+            max-height: 300px; overflow-y: auto; background: #fff;
+            border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 12px; margin-top: 20px;
+        }
+        .feed-entry {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 8px 10px; border-left: 3px solid #ccc; margin-bottom: 6px;
+            font-size: 13px; color: #444; border-radius: 0 4px 4px 0;
+            background: #fafafa;
+        }
+        .feed-entry .feed-time { color: #999; font-size: 11px; white-space: nowrap; min-width: 55px; }
+        .feed-entry .feed-agent { font-weight: 600; color: #333; }
+        .feed-entry.type-session_started { border-left-color: #28a745; }
+        .feed-entry.type-session_ended { border-left-color: #6c757d; }
+        .feed-entry.type-message_sent { border-left-color: #007bff; }
+        .feed-entry.type-idle_started { border-left-color: #ffc107; }
+        .feed-entry.type-idle_resumed { border-left-color: #28a745; }
+        .feed-entry.type-shift_started { border-left-color: #28a745; }
+        .feed-entry.type-shift_ended { border-left-color: #6c757d; }
+        .feed-entry.type-tab_focus_lost { border-left-color: #fd7e14; }
+        .feed-entry.type-tab_focus_gained { border-left-color: #17a2b8; }
+        .feed-entry.type-auto_timeout { border-left-color: #dc3545; background: #fff5f5; }
+
         /* Agent nav */
         .agent-nav { margin-bottom: 20px; }
         .agent-nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
@@ -124,6 +149,14 @@
         <div id="idle-alert" class="idle-alert-banner"></div>
         <div id="cards-container" class="cards-grid">
             <div class="empty">Loading...</div>
+        </div>
+
+        <!-- Live Activity Feed -->
+        <div id="activity-feed-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 12px;">Live Activity Feed</h2>
+            <div id="activity-feed" class="feed-container">
+                <div class="empty">Waiting for activity...</div>
+            </div>
         </div>
     </div>
 
@@ -573,6 +606,14 @@
                     <div class="label">Avg Msgs/Session</div>
                     <div class="value">${perf.average_messages_per_session}</div>
                 </div>
+                <div class="summary-card blue">
+                    <div class="label">Avg Response</div>
+                    <div class="value">${formatDuration(perf.average_response_seconds || 0)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Min / Max Response</div>
+                    <div class="value" style="font-size:14px;">${formatDuration(perf.min_response_seconds || 0)} / ${formatDuration(perf.max_response_seconds || 0)}</div>
+                </div>
             `;
         }
 
@@ -709,6 +750,89 @@
         }
 
         // =====================
+        // LIVE ACTIVITY FEED
+        // =====================
+        let lastFeedTimestamp = null;
+
+        function formatEventDescription(event) {
+            const name = event.agent_name || "Unknown";
+            const chat = event.chat_name || "Unknown chat";
+            const meta = event.metadata || {};
+            const responseTime = meta.response_time_seconds ? formatDuration(meta.response_time_seconds) : null;
+            const durationSec = meta.duration_seconds ? formatDuration(meta.duration_seconds) : null;
+            const reason = meta.reason || "";
+
+            switch (event.event_type) {
+                case "session_started":
+                    return `<span class="feed-agent">${name}</span> opened chat with <strong>${chat}</strong>`;
+                case "session_ended":
+                    if (reason === "auto_timeout") return `<span class="feed-agent">${name}</span>'s session auto-closed (timeout)`;
+                    if (reason === "new_chat_opened") return `<span class="feed-agent">${name}</span>'s previous chat closed (new chat opened)`;
+                    return `<span class="feed-agent">${name}</span> closed chat` + (durationSec ? ` (${durationSec})` : "");
+                case "message_sent":
+                    return `<span class="feed-agent">${name}</span> sent message` + (responseTime ? ` (response: ${responseTime})` : "");
+                case "idle_started":
+                    return `<span class="feed-agent">${name}</span> went idle (in session)`;
+                case "idle_resumed":
+                    return `<span class="feed-agent">${name}</span> resumed activity`;
+                case "shift_started":
+                    return `<span class="feed-agent">${name}</span> started shift`;
+                case "shift_ended":
+                    return `<span class="feed-agent">${name}</span> ended shift` + (durationSec ? ` (${durationSec})` : "");
+                case "tab_focus_lost":
+                    return `<span class="feed-agent">${name}</span> left tab`;
+                case "tab_focus_gained":
+                    return `<span class="feed-agent">${name}</span> returned to tab`;
+                default:
+                    return `<span class="feed-agent">${name}</span> — ${event.event_type}`;
+            }
+        }
+
+        function formatFeedTime(isoStr) {
+            const d = new Date(isoStr);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        async function loadActivityFeed() {
+            if (!isAdmin) return;
+            try {
+                const url = "/api/activity-feed?limit=50" + (lastFeedTimestamp ? "&since=" + encodeURIComponent(lastFeedTimestamp) : "");
+                const res = await authFetch(url);
+                const data = await res.json();
+                if (!data.events || data.events.length === 0) return;
+
+                const container = document.getElementById("activity-feed");
+                // Clear placeholder on first load
+                if (!lastFeedTimestamp) container.innerHTML = "";
+
+                // Events come newest-first from API, reverse to prepend in correct order
+                const newEvents = data.events.reverse();
+                for (const event of newEvents) {
+                    const typeClass = event.metadata?.reason === "auto_timeout" ? "type-auto_timeout" : "type-" + event.event_type;
+                    const entry = document.createElement("div");
+                    entry.className = "feed-entry " + typeClass;
+                    entry.innerHTML = `
+                        <span class="feed-time">${formatFeedTime(event.created_at)}</span>
+                        <span>${formatEventDescription(event)}</span>
+                    `;
+                    container.prepend(entry);
+                }
+
+                // Keep feed from growing too large (max 100 entries)
+                const MAX_FEED_ENTRIES = 100;
+                while (container.children.length > MAX_FEED_ENTRIES) {
+                    container.removeChild(container.lastChild);
+                }
+
+                if (data.latest_timestamp) {
+                    lastFeedTimestamp = data.latest_timestamp;
+                }
+            } catch (err) {
+                console.error("Failed to load activity feed:", err);
+            }
+        }
+
+        // =====================
         // INIT
         // =====================
         setDefaultDate();
@@ -718,6 +842,8 @@
             setInterval(loadOverview, 5000);
             setInterval(fetchThresholds, 30000);
             loadAgentList();
+            loadActivityFeed();
+            setInterval(loadActivityFeed, 5000);
         }
 
         if (isAgent) {

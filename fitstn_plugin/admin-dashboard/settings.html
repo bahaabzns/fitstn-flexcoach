@@ -66,6 +66,18 @@
             <input type="number" id="max-session-min" min="1" max="480" value="30">
             <div class="hint">Alert agents and admins when a chat session exceeds this duration.</div>
         </div>
+        <h2 style="margin-top: 24px;">In-Session Idle Detection</h2>
+        <div class="field">
+            <label for="idle-in-session-min">Idle inside session after (minutes)</label>
+            <input type="number" id="idle-in-session-min" min="1" max="60" value="2">
+            <div class="hint">Detect when an agent has no keyboard/mouse activity inside an active chat session.</div>
+        </div>
+        <h2 style="margin-top: 24px;">Auto Session Timeout</h2>
+        <div class="field">
+            <label for="session-timeout-min">Auto-close sessions after (minutes)</label>
+            <input type="number" id="session-timeout-min" min="1" max="120" value="10">
+            <div class="hint">Automatically close inactive sessions after this period of no messages or activity.</div>
+        </div>
         <div class="actions">
             <button class="btn btn-primary" id="save-btn">Save</button>
             <span class="msg success" id="success-msg">Settings saved.</span>
@@ -93,6 +105,8 @@
         const warningInput = document.getElementById('warning-min');
         const criticalInput = document.getElementById('critical-min');
         const maxSessionInput = document.getElementById('max-session-min');
+        const idleInSessionInput = document.getElementById('idle-in-session-min');
+        const sessionTimeoutInput = document.getElementById('session-timeout-min');
         const saveBtn = document.getElementById('save-btn');
         const successMsg = document.getElementById('success-msg');
         const errorMsg = document.getElementById('error-msg');
@@ -104,6 +118,8 @@
                 if (data.idle_warning_minutes) warningInput.value = data.idle_warning_minutes;
                 if (data.idle_critical_minutes) criticalInput.value = data.idle_critical_minutes;
                 if (data.max_session_minutes) maxSessionInput.value = data.max_session_minutes;
+                if (data.idle_inside_session_minutes) idleInSessionInput.value = data.idle_inside_session_minutes;
+                if (data.session_timeout_minutes) sessionTimeoutInput.value = data.session_timeout_minutes;
             } catch (err) {
                 errorMsg.textContent = 'Failed to load settings.';
                 errorMsg.style.display = 'inline';
@@ -122,6 +138,8 @@
                         idle_warning_minutes: parseInt(warningInput.value),
                         idle_critical_minutes: parseInt(criticalInput.value),
                         max_session_minutes: parseInt(maxSessionInput.value),
+                        idle_inside_session_minutes: parseInt(idleInSessionInput.value),
+                        session_timeout_minutes: parseInt(sessionTimeoutInput.value),
                     }),
                 });
                 const data = await res.json();
