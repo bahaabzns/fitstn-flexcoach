@@ -27,7 +27,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const sql = process.env.DATABASE_URL
-    ? postgres(process.env.DATABASE_URL)
+    ? postgres(process.env.DATABASE_URL, { ssl: "require" })
     : postgres({
         host: "localhost",
         port: 5432,
