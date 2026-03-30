@@ -276,6 +276,19 @@ async function updateStatusBadge() {
             detail.style.display = "none";
         }
 
+        // Sync session popup with server status
+        const sessionPopup = document.getElementById("fc-session-popup");
+        const isPopupVisible = sessionPopup && sessionPopup.style.display !== "none";
+
+        if (data.status === "active" && !isPopupVisible && isChatPage) {
+            // Server says active but popup is hidden — show it with correct start time
+            showSessionPopup(new Date(data.chat_started_at).getTime());
+            if (!currentSessionId) startIdleDetection();
+        } else if (data.status !== "active" && isPopupVisible) {
+            // Server says not active but popup is still showing — session was closed server-side
+            hideSessionPopup();
+        }
+
         // Show shift time stats when on shift
         if (data.shift_started_at && shiftTimesContainer) {
             const shiftSeconds = Math.round((Date.now() - new Date(data.shift_started_at).getTime()) / 1000);
@@ -369,9 +382,9 @@ function fetchMaxSessionThreshold() {
         .catch(() => {});
 }
 
-function showSessionPopup() {
+function showSessionPopup(startTimeOverride) {
     const popup = createSessionPopup();
-    sessionStartTime = Date.now();
+    sessionStartTime = startTimeOverride || Date.now();
     popup.style.display = "block";
     popup.style.borderLeftColor = "#28a745";
     setTimeout(() => { popup.style.opacity = "1"; }, 10);
