@@ -752,7 +752,8 @@
         // =====================
         // LIVE ACTIVITY FEED
         // =====================
-        let lastFeedTimestamp = null;
+        let lastFeedId = null;
+        const seenEventIds = new Set();
 
         function formatEventDescription(event) {
             const name = event.agent_name || "Unknown";
@@ -796,18 +797,21 @@
         async function loadActivityFeed() {
             if (!isAdmin) return;
             try {
-                const url = "/api/activity-feed?limit=50" + (lastFeedTimestamp ? "&since=" + encodeURIComponent(lastFeedTimestamp) : "");
+                const url = "/api/activity-feed?limit=50" + (lastFeedId ? "&since_id=" + lastFeedId : "");
                 const res = await authFetch(url);
                 const data = await res.json();
                 if (!data.events || data.events.length === 0) return;
 
                 const container = document.getElementById("activity-feed");
                 // Clear placeholder on first load
-                if (!lastFeedTimestamp) container.innerHTML = "";
+                if (seenEventIds.size === 0) container.innerHTML = "";
 
-                // Events come newest-first from API, reverse to prepend in correct order
+                // Events come newest-first from API, reverse to prepend in correct order (oldest first)
                 const newEvents = data.events.reverse();
                 for (const event of newEvents) {
+                    if (seenEventIds.has(event.id)) continue;
+                    seenEventIds.add(event.id);
+
                     const typeClass = event.metadata?.reason === "auto_timeout" ? "type-auto_timeout" : "type-" + event.event_type;
                     const entry = document.createElement("div");
                     entry.className = "feed-entry " + typeClass;
@@ -824,8 +828,8 @@
                     container.removeChild(container.lastChild);
                 }
 
-                if (data.latest_timestamp) {
-                    lastFeedTimestamp = data.latest_timestamp;
+                if (data.latest_id) {
+                    lastFeedId = data.latest_id;
                 }
             } catch (err) {
                 console.error("Failed to load activity feed:", err);

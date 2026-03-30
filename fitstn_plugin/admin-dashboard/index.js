@@ -296,7 +296,7 @@ app.post("/api/chat-click", requireAgent, async (req, res) => {
         for (const closed of updated) {
             await sql`
                 INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
-                VALUES (${req.user.id}, 'session_ended', ${closed.id}, '{"reason": "new_chat_opened"}')
+                VALUES (${req.user.id}, 'session_ended', ${closed.id}, '{"reason": "new_chat_opened"}'::jsonb)
             `;
         }
 
@@ -349,7 +349,7 @@ app.post("/api/session-message", requireAgent, async (req, res) => {
 
         await sql`
             INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
-            VALUES (${req.user.id}, 'message_sent', ${updated[0].id}, ${JSON.stringify({ response_time_seconds: responseTimeSeconds })})
+            VALUES (${req.user.id}, 'message_sent', ${updated[0].id}, ${JSON.stringify({ response_time_seconds: responseTimeSeconds })}::jsonb)
         `;
 
         res.json({ success: true, session_id: updated[0].id, message_count: updated[0].message_count });
@@ -422,7 +422,7 @@ app.post("/api/close-session", requireAgent, async (req, res) => {
         for (const closed of updated) {
             await sql`
                 INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
-                VALUES (${req.user.id}, 'session_ended', ${closed.id}, '{"reason": "manual_close"}')
+                VALUES (${req.user.id}, 'session_ended', ${closed.id}, '{"reason": "manual_close"}'::jsonb)
             `;
         }
 
@@ -637,6 +637,7 @@ async function checkSessionTimeouts() {
         const timeoutMinutes = parseInt(timeoutSetting[0]?.value) || 10;
 
         // Find sessions with no activity past the timeout threshold
+        const timeoutInterval = timeoutMinutes + " minutes";
         const staleSessions = await sql`
             SELECT s.id, s.agent_id
             FROM sessions s
@@ -644,8 +645,8 @@ async function checkSessionTimeouts() {
             AND (
                 CASE
                     WHEN jsonb_array_length(COALESCE(s.messages, '[]'::jsonb)) > 0
-                    THEN (s.messages->-1->>'sent_at')::timestamp < NOW() - make_interval(mins => ${timeoutMinutes})
-                    ELSE s.clicked_at < NOW() - make_interval(mins => ${timeoutMinutes})
+                    THEN (s.messages->-1->>'sent_at')::timestamptz < NOW() - ${timeoutInterval}::interval
+                    ELSE s.clicked_at < NOW() - ${timeoutInterval}::interval
                 END
             )
         `;
@@ -654,7 +655,7 @@ async function checkSessionTimeouts() {
             await sql`UPDATE sessions SET ended_at = NOW() WHERE id = ${session.id}`;
             await sql`
                 INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
-                VALUES (${session.agent_id}, 'session_ended', ${session.id}, '{"reason": "auto_timeout"}')
+                VALUES (${session.agent_id}, 'session_ended', ${session.id}, '{"reason": "auto_timeout"}'::jsonb)
             `;
         }
 

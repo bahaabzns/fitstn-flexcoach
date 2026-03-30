@@ -42,7 +42,7 @@ module.exports = function (sql, requireAgent, requireAdmin) {
                     ${event_type},
                     ${session_id || null},
                     ${shift_id || null},
-                    ${JSON.stringify(metadata || {})}
+                    ${JSON.stringify(metadata || {})}::jsonb
                 )
                 RETURNING id, created_at
             `;
@@ -92,7 +92,7 @@ module.exports = function (sql, requireAgent, requireAdmin) {
     // GET /api/activity-feed — live feed for admin dashboard
     router.get("/activity-feed", requireAdmin, async (req, res) => {
         try {
-            const since = req.query.since || null;
+            const sinceId = req.query.since_id ? parseInt(req.query.since_id) : null;
             const limit = Math.min(parseInt(req.query.limit) || DEFAULT_FEED_LIMIT, MAX_FEED_LIMIT);
 
             const events = await sql`
@@ -110,14 +110,14 @@ module.exports = function (sql, requireAgent, requireAdmin) {
                 JOIN agents a ON a.id = ae.agent_id
                 LEFT JOIN sessions s ON s.id = ae.session_id
                 WHERE 1=1
-                    ${since ? sql`AND ae.created_at > ${since}::timestamp` : sql``}
+                    ${sinceId ? sql`AND ae.id > ${sinceId}` : sql``}
                 ORDER BY ae.created_at DESC
                 LIMIT ${limit}
             `;
 
-            const latestTimestamp = events.length > 0 ? events[0].created_at : since;
+            const latestId = events.length > 0 ? Math.max(...events.map(e => e.id)) : sinceId;
 
-            res.json({ events, latest_timestamp: latestTimestamp });
+            res.json({ events, latest_id: latestId });
         } catch (err) {
             console.error("Error fetching activity feed:", err.message);
             res.status(500).json({ error: "Failed to fetch activity feed", details: err.message });

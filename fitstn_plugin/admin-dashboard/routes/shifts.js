@@ -45,7 +45,7 @@ module.exports = function (sql, requireAgent) {
             );
             await sql`
                 INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
-                VALUES (${req.user.id}, 'shift_ended', ${result[0].id}, ${JSON.stringify({ duration_seconds: shiftDurationSeconds })})
+                VALUES (${req.user.id}, 'shift_ended', ${result[0].id}, ${JSON.stringify({ duration_seconds: shiftDurationSeconds })}::jsonb)
             `;
 
             res.json({ success: true, shift: result[0] });
