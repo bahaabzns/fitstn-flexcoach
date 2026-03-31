@@ -241,6 +241,11 @@ function createStatusBadge() {
             </div>
             <div id="fc-session-warning" style="display:none; font-size:11px; color:#fca5a5; font-weight:bold; margin-left:4px;"></div>
         </div>
+        <div id="fc-actions" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-left:1px solid #334155;">
+            <button id="fc-btn-shift" onclick="document.dispatchEvent(new CustomEvent('fc-shift-toggle'))" style="padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#22c55e; color:#fff; white-space:nowrap;">Start Shift</button>
+            <button id="fc-btn-overview" onclick="document.dispatchEvent(new CustomEvent('fc-open-overview'))" style="padding:6px 14px; border:1px solid #475569; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:transparent; color:#cbd5e1; white-space:nowrap;">My Overview</button>
+            <button id="fc-btn-signout" onclick="document.dispatchEvent(new CustomEvent('fc-sign-out'))" style="padding:6px 14px; border:1px solid #7f1d1d; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:#991b1b; color:#fca5a5; white-space:nowrap;">Sign Out</button>
+        </div>
     `;
 
     const style = document.createElement("style");
@@ -259,6 +264,88 @@ function removeStatusBadge() {
     const barStyles = document.getElementById("fc-top-bar-styles");
     if (barStyles) barStyles.remove();
 }
+
+/* ───────── Top Bar Button Handlers ───────── */
+
+async function handleShiftToggle() {
+    if (!currentToken) return;
+    const btn = document.getElementById("fc-btn-shift");
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+
+    const isOnShift = btn.dataset.onShift === "true";
+    const endpoint = isOnShift ? "/api/agent/end-shift" : "/api/agent/start-shift";
+
+    try {
+        const res = await fetch(API_BASE + endpoint, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + currentToken },
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            console.error("Shift toggle failed:", err.error || "Unknown error");
+        }
+        updateStatusBadge();
+    } catch (err) {
+        console.error("Shift toggle request failed:", err);
+    } finally {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+    }
+}
+
+function handleOpenOverview() {
+    if (!currentToken) return;
+    window.open(API_BASE + "/overview.html#agentToken=" + currentToken, "_blank");
+}
+
+async function handleSignOut() {
+    if (!currentToken) return;
+    const btn = document.getElementById("fc-btn-signout");
+    if (btn) { btn.disabled = true; btn.style.opacity = "0.6"; }
+
+    try {
+        await fetch(API_BASE + "/api/agent/logout", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + currentToken },
+        });
+    } catch (err) {
+        console.error("Sign out request failed:", err);
+    }
+
+    currentToken = null;
+    chrome.storage.local.remove(["agentToken", "agentInfo", "activeShift"]);
+    stopStatusPolling();
+    hideSessionPopup();
+    showNotSignedIn();
+    updateActionButtons(false, false);
+}
+
+function updateActionButtons(isSignedIn, isOnShift) {
+    const actionsContainer = document.getElementById("fc-actions");
+    const shiftBtn = document.getElementById("fc-btn-shift");
+    if (!actionsContainer) return;
+
+    actionsContainer.style.display = isSignedIn ? "flex" : "none";
+
+    if (shiftBtn) {
+        shiftBtn.dataset.onShift = isOnShift ? "true" : "false";
+        if (isOnShift) {
+            shiftBtn.textContent = "End Shift";
+            shiftBtn.style.background = "#dc2626";
+            shiftBtn.style.color = "#fff";
+        } else {
+            shiftBtn.textContent = "Start Shift";
+            shiftBtn.style.background = "#22c55e";
+            shiftBtn.style.color = "#fff";
+        }
+    }
+}
+
+document.addEventListener("fc-shift-toggle", handleShiftToggle);
+document.addEventListener("fc-open-overview", handleOpenOverview);
+document.addEventListener("fc-sign-out", handleSignOut);
 
 async function updateStatusBadge() {
     if (!currentToken) return;
@@ -308,7 +395,8 @@ async function updateStatusBadge() {
         }
 
         // Show shift time stats when on shift
-        if (data.shift_started_at && shiftTimesContainer) {
+        const isOnShift = !!data.shift_started_at;
+        if (isOnShift && shiftTimesContainer) {
             const shiftSeconds = Math.round((Date.now() - new Date(data.shift_started_at).getTime()) / 1000);
             const activeSeconds = data.total_active_seconds || 0;
             const idleSeconds = Math.max(0, shiftSeconds - activeSeconds);
@@ -320,6 +408,8 @@ async function updateStatusBadge() {
         } else if (shiftTimesContainer) {
             shiftTimesContainer.style.display = "none";
         }
+
+        updateActionButtons(true, isOnShift);
     } catch {
         // keep last known state
     }
@@ -346,6 +436,7 @@ function showNotSignedIn() {
     label.style.color = colors.text;
     label.textContent = STATUS_LABELS.not_signed_in;
     detail.style.display = "none";
+    updateActionButtons(false, false);
 }
 
 function getSessionCard() {
@@ -424,6 +515,19 @@ function hideSessionPopup() {
     if (card) card.style.display = "none";
 }
 
+function extractChatNameFromHeader() {
+    const chatHeader = document.querySelector(".border-b.bg-background");
+    if (!chatHeader) return "";
+    const nameEl = chatHeader.querySelector("h1");
+    const codeEl = chatHeader.querySelector("span.text-xs");
+    const name = nameEl?.innerText?.trim() || "";
+    const code = codeEl?.innerText?.trim() || "";
+    if (name && code) return name + " " + code;
+    if (name) return name;
+    if (code) return code;
+    return "";
+}
+
 function attachClickHandlers() {
     if (!currentToken) return;
     const chats = document.querySelectorAll(CHATS_SELECTOR);
@@ -433,28 +537,29 @@ function attachClickHandlers() {
         if (!chat.dataset.handlerAttached) {
             chat.addEventListener("click", function handleClick() {
                 if (!currentToken) return;
-                const chatName =
-                    chat.querySelector("h3, [class*='font-semibold']")?.textContent?.trim() || "none";
-                const chatPreview =
-                    chat.querySelector("p, [class*='text-muted']")?.textContent?.trim() || "none";
 
                 showSessionPopup();
 
-                fetch(API_URL, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: "Bearer " + currentToken,
-                    },
-                    body: JSON.stringify({ chatName, chatPreview }),
-                })
-                    .then((res) => res.json())
-                    .then((data) => {
-                        console.log("Chat click saved:", data);
-                        currentSessionId = data.data?.id || null;
-                        startIdleDetection();
+                // Wait for the chat header to load, then extract name + code
+                setTimeout(() => {
+                    const chatName = extractChatNameFromHeader() || "Unknown";
+
+                    fetch(API_URL, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: "Bearer " + currentToken,
+                        },
+                        body: JSON.stringify({ chatName, chatPreview: "" }),
                     })
-                    .catch((err) => console.error("Failed to save chat click:", err));
+                        .then((res) => res.json())
+                        .then((data) => {
+                            console.log("Chat click saved:", data);
+                            currentSessionId = data.data?.id || null;
+                            startIdleDetection();
+                        })
+                        .catch((err) => console.error("Failed to save chat click:", err));
+                }, 500);
             });
             chat.dataset.handlerAttached = "true";
         }
