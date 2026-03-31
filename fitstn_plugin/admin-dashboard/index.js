@@ -460,18 +460,34 @@ app.post("/api/reset-database", requireAdmin, async (req, res) => {
     }
 });
 
-app.post("/api/close-session", requireAgent, async (req, res) => {
+app.post("/api/close-session", async (req, res) => {
     try {
+        // Support both Authorization header and body token (for sendBeacon on reload)
+        let agentId = null;
+        const authHeader = req.headers.authorization;
+        const bodyToken = req.body?._token;
+        const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : bodyToken;
+
+        if (!token) return res.status(401).json({ error: "No token provided" });
+
+        const rows = await sql`
+            SELECT t.user_id FROM auth_tokens t
+            JOIN agents a ON t.user_id = a.id
+            WHERE t.token = ${token} AND t.user_type = 'agent' AND t.expires_at > NOW() AND a.is_active = true
+        `;
+        if (rows.length === 0) return res.status(401).json({ error: "Invalid or expired token" });
+        agentId = rows[0].user_id;
+
         const updated = await sql`
             UPDATE sessions SET ended_at = NOW()
-            WHERE ended_at IS NULL AND agent_id = ${req.user.id}
+            WHERE ended_at IS NULL AND agent_id = ${agentId}
             RETURNING id
         `;
         // Log session_ended events
         for (const closed of updated) {
             await sql`
                 INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
-                VALUES (${req.user.id}, 'session_ended', ${closed.id}, '{"reason": "manual_close"}'::jsonb)
+                VALUES (${agentId}, 'session_ended', ${closed.id}, '{"reason": "manual_close"}'::jsonb)
             `;
         }
 

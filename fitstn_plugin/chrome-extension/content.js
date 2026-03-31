@@ -27,10 +27,18 @@ let mouseMoveDebounceTimer = null;
 
 const isChatPage = location.pathname.startsWith("/dashboard/chat");
 
-// Native browser confirmation on tab close / reload — only on chat pages, only if signed in and on shift
+// Close session on tab close / reload — only on chat pages, only if signed in and on shift
 if (isChatPage) {
     window.addEventListener("beforeunload", (event) => {
         if (isAgentSignedInAndOnShift()) {
+            // Use sendBeacon to reliably close the session even during reload
+            const token = currentToken;
+            if (token) {
+                navigator.sendBeacon(
+                    API_BASE + "/api/close-session",
+                    new Blob([JSON.stringify({ _token: token })], { type: "application/json" })
+                );
+            }
             event.preventDefault();
             event.returnValue = "";
         }
@@ -517,14 +525,20 @@ function updateActionButtons(isSignedIn, isOnShift, isOnBreak) {
 
     if (shiftBtn) {
         shiftBtn.dataset.onShift = isOnShift ? "true" : "false";
+        const isReopenGraceActive = shiftEndedAt !== null;
         if (isOnShift) {
             shiftBtn.textContent = "End Shift";
             shiftBtn.style.background = "#dc2626";
             shiftBtn.style.color = "#fff";
+            shiftBtn.style.display = "inline-block";
+        } else if (isReopenGraceActive) {
+            // During reopen grace period, hide Start Shift — only show Reopen
+            shiftBtn.style.display = "none";
         } else {
             shiftBtn.textContent = "Start Shift";
             shiftBtn.style.background = "#22c55e";
             shiftBtn.style.color = "#fff";
+            shiftBtn.style.display = "inline-block";
         }
     }
 
