@@ -1,6 +1,6 @@
 const express = require("express");
 
-module.exports = function (sql, requireAgent, requireAdmin) {
+module.exports = function (sql, requireAgent) {
     const router = express.Router();
 
     router.post("/start-shift", requireAgent, async (req, res) => {
@@ -322,70 +322,6 @@ module.exports = function (sql, requireAgent, requireAdmin) {
             res.json(settings);
         } catch (err) {
             res.status(500).json({ error: "Failed to fetch settings", details: err.message });
-        }
-    });
-
-    // Admin: adjust shift times with audit trail
-    router.put("/shifts/:id", requireAdmin, async (req, res) => {
-        try {
-            const shiftId = parseInt(req.params.id);
-            if (!shiftId) return res.status(400).json({ error: "Invalid shift ID" });
-
-            const { shift_started_at, shift_ended_at, reason } = req.body;
-            if (!reason || reason.trim().length < 3) {
-                return res.status(400).json({ error: "A reason is required (at least 3 characters)" });
-            }
-            if (!shift_started_at) {
-                return res.status(400).json({ error: "shift_started_at is required" });
-            }
-
-            const startDate = new Date(shift_started_at);
-            const endDate = shift_ended_at ? new Date(shift_ended_at) : null;
-            if (isNaN(startDate.getTime())) {
-                return res.status(400).json({ error: "Invalid shift_started_at date" });
-            }
-            if (endDate && isNaN(endDate.getTime())) {
-                return res.status(400).json({ error: "Invalid shift_ended_at date" });
-            }
-            if (endDate && endDate <= startDate) {
-                return res.status(400).json({ error: "shift_ended_at must be after shift_started_at" });
-            }
-
-            // Fetch original values for audit log
-            const original = await sql`SELECT * FROM shifts WHERE id = ${shiftId}`;
-            if (original.length === 0) {
-                return res.status(404).json({ error: "Shift not found" });
-            }
-
-            const result = await sql`
-                UPDATE shifts
-                SET shift_started_at = ${startDate.toISOString()},
-                    shift_ended_at = ${endDate ? endDate.toISOString() : null}
-                WHERE id = ${shiftId}
-                RETURNING *
-            `;
-
-            // Log the adjustment with before/after values
-            const adjustmentMetadata = JSON.stringify({
-                reason: reason.trim(),
-                admin_id: req.user.id,
-                before: {
-                    shift_started_at: original[0].shift_started_at,
-                    shift_ended_at: original[0].shift_ended_at,
-                },
-                after: {
-                    shift_started_at: result[0].shift_started_at,
-                    shift_ended_at: result[0].shift_ended_at,
-                },
-            });
-            await sql`
-                INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
-                VALUES (${original[0].agent_id}, 'shift_adjusted', ${shiftId}, ${adjustmentMetadata}::jsonb)
-            `;
-
-            res.json({ success: true, shift: result[0] });
-        } catch (err) {
-            res.status(500).json({ error: "Failed to adjust shift", details: err.message });
         }
     });
 

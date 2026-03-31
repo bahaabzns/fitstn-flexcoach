@@ -43,7 +43,7 @@ const { requireAdmin, requireAgent } = require("./middleware/auth")(sql);
 const adminAuthRoutes = require("./routes/admin-auth")(sql);
 const agentAuthRoutes = require("./routes/agent-auth")(sql, requireAgent);
 const agentRoutes = require("./routes/agents")(sql, requireAdmin);
-const shiftRoutes = require("./routes/shifts")(sql, requireAgent, requireAdmin);
+const shiftRoutes = require("./routes/shifts")(sql, requireAgent);
 const salaryRoutes = require("./routes/salaries")(sql, requireAdmin);
 const agentOverviewRoutes = require("./routes/agent-overview")(sql);
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
@@ -58,7 +58,6 @@ app.use("/api/admin", adminAuthRoutes);
 app.use("/api/agent", agentAuthRoutes);
 app.use("/api/agents", agentRoutes);
 app.use("/api/agent", shiftRoutes);
-app.use("/api", shiftRoutes);
 app.use("/api/salaries", salaryRoutes);
 app.use("/api/agent-overview", agentOverviewRoutes);
 app.use("/api", activityEventRoutes);
@@ -195,6 +194,67 @@ app.get("/api/shifts", requireAdmin, async (req, res) => {
         res.json({ period: { type: period, start: startDate, end: endDate }, shifts: rows });
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch shifts", details: err.message });
+    }
+});
+
+app.put("/api/shifts/:id", requireAdmin, async (req, res) => {
+    try {
+        const shiftId = parseInt(req.params.id);
+        if (!shiftId) return res.status(400).json({ error: "Invalid shift ID" });
+
+        const { shift_started_at, shift_ended_at, reason } = req.body;
+        if (!reason || reason.trim().length < 3) {
+            return res.status(400).json({ error: "A reason is required (at least 3 characters)" });
+        }
+        if (!shift_started_at) {
+            return res.status(400).json({ error: "shift_started_at is required" });
+        }
+
+        const startDate = new Date(shift_started_at);
+        const endDate = shift_ended_at ? new Date(shift_ended_at) : null;
+        if (isNaN(startDate.getTime())) {
+            return res.status(400).json({ error: "Invalid shift_started_at date" });
+        }
+        if (endDate && isNaN(endDate.getTime())) {
+            return res.status(400).json({ error: "Invalid shift_ended_at date" });
+        }
+        if (endDate && endDate <= startDate) {
+            return res.status(400).json({ error: "shift_ended_at must be after shift_started_at" });
+        }
+
+        const original = await sql`SELECT * FROM shifts WHERE id = ${shiftId}`;
+        if (original.length === 0) {
+            return res.status(404).json({ error: "Shift not found" });
+        }
+
+        const result = await sql`
+            UPDATE shifts
+            SET shift_started_at = ${startDate.toISOString()},
+                shift_ended_at = ${endDate ? endDate.toISOString() : null}
+            WHERE id = ${shiftId}
+            RETURNING *
+        `;
+
+        const adjustmentMetadata = JSON.stringify({
+            reason: reason.trim(),
+            admin_id: req.user.id,
+            before: {
+                shift_started_at: original[0].shift_started_at,
+                shift_ended_at: original[0].shift_ended_at,
+            },
+            after: {
+                shift_started_at: result[0].shift_started_at,
+                shift_ended_at: result[0].shift_ended_at,
+            },
+        });
+        await sql`
+            INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
+            VALUES (${original[0].agent_id}, 'shift_adjusted', ${shiftId}, ${adjustmentMetadata}::jsonb)
+        `;
+
+        res.json({ success: true, shift: result[0] });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to adjust shift", details: err.message });
     }
 });
 
