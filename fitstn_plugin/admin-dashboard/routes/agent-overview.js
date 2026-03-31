@@ -384,7 +384,10 @@ function buildDailyBreakdown(startDate, endDate, shiftData, sessionData) {
     const shiftMap = {};
     shiftData.forEach(row => {
         const key = formatLocalDate(new Date(row.shift_date));
-        shiftMap[key] = row.shift_seconds || 0;
+        shiftMap[key] = {
+            shift_seconds: row.shift_seconds || 0,
+            break_seconds: row.break_seconds || 0,
+        };
     });
 
     const sessionMap = {};
@@ -403,10 +406,12 @@ function buildDailyBreakdown(startDate, endDate, shiftData, sessionData) {
 
     while (current <= end) {
         const key = formatLocalDate(current);
+        const shiftInfo = shiftMap[key] || { shift_seconds: 0, break_seconds: 0 };
         const sessionInfo = sessionMap[key] || { sessions: 0, active_seconds: 0, messages: 0 };
         days.push({
             date: key,
-            shift_seconds: shiftMap[key] || 0,
+            shift_seconds: shiftInfo.shift_seconds,
+            break_seconds: shiftInfo.break_seconds,
             sessions: sessionInfo.sessions,
             active_seconds: sessionInfo.active_seconds,
             messages: sessionInfo.messages

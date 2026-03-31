@@ -52,12 +52,26 @@ module.exports = function (sql, requireAgent) {
                 WHERE shift_id = ${result[0].id} AND ended_at IS NULL
             `;
 
-            const shiftDurationSeconds = Math.round(
+            // Calculate effective duration (gross shift time minus total break time)
+            const grossShiftSeconds = Math.round(
                 (new Date(result[0].shift_ended_at) - new Date(result[0].shift_started_at)) / 1000
             );
+            const breakData = await sql`
+                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))), 0) AS total_seconds
+                FROM shift_breaks
+                WHERE shift_id = ${result[0].id}
+            `;
+            const totalBreakSeconds = Math.round(Number(breakData[0].total_seconds));
+            const effectiveShiftSeconds = Math.max(0, grossShiftSeconds - totalBreakSeconds);
+
+            const shiftEndedMetadata = JSON.stringify({
+                duration_seconds: effectiveShiftSeconds,
+                gross_duration_seconds: grossShiftSeconds,
+                break_seconds: totalBreakSeconds,
+            });
             await sql`
                 INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
-                VALUES (${req.user.id}, 'shift_ended', ${result[0].id}, ${JSON.stringify({ duration_seconds: shiftDurationSeconds })}::jsonb)
+                VALUES (${req.user.id}, 'shift_ended', ${result[0].id}, ${shiftEndedMetadata}::jsonb)
             `;
 
             res.json({ success: true, shift: result[0] });
@@ -214,23 +228,7 @@ module.exports = function (sql, requireAgent) {
             `;
             const totalBreakSeconds = Math.round(Number(breakData[0].total_seconds));
 
-            // If on break, return early with on_break status
-            if (activeBreak.length > 0) {
-                const currentBreakSeconds = Math.round((Date.now() - new Date(activeBreak[0].started_at).getTime()) / 1000);
-                return res.json({
-                    status: "on_break",
-                    break_started_at: activeBreak[0].started_at,
-                    shift_started_at: shiftStartedAt,
-                    total_break_seconds: totalBreakSeconds + currentBreakSeconds,
-                    total_active_seconds: 0,
-                });
-            }
-
-            const session = await sql`
-                SELECT id, chat_name, clicked_at FROM sessions
-                WHERE agent_id = ${agentId} AND ended_at IS NULL
-                ORDER BY clicked_at DESC LIMIT 1
-            `;
+            // Fetch session data before checking break status (needed for all statuses)
             const completedSessions = await sql`
                 SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - clicked_at))), 0) AS total_seconds
                 FROM sessions
@@ -239,6 +237,24 @@ module.exports = function (sql, requireAgent) {
                   AND ended_at IS NOT NULL
             `;
             const completedActiveSeconds = Math.round(Number(completedSessions[0].total_seconds));
+
+            // If on break, return with on_break status (includes real active seconds)
+            if (activeBreak.length > 0) {
+                const currentBreakSeconds = Math.round((Date.now() - new Date(activeBreak[0].started_at).getTime()) / 1000);
+                return res.json({
+                    status: "on_break",
+                    break_started_at: activeBreak[0].started_at,
+                    shift_started_at: shiftStartedAt,
+                    total_break_seconds: totalBreakSeconds + currentBreakSeconds,
+                    total_active_seconds: completedActiveSeconds,
+                });
+            }
+
+            const session = await sql`
+                SELECT id, chat_name, clicked_at FROM sessions
+                WHERE agent_id = ${agentId} AND ended_at IS NULL
+                ORDER BY clicked_at DESC LIMIT 1
+            `;
 
             if (session.length > 0) {
                 const currentSessionSeconds = Math.round((Date.now() - new Date(session[0].clicked_at).getTime()) / 1000);
