@@ -314,16 +314,30 @@ async function handleBreakToggle() {
             headers: { Authorization: "Bearer " + currentToken },
         });
         if (!res.ok) {
-            const err = await res.json();
-            console.error("Break toggle failed:", err.error || "Unknown error");
+            const err = await res.json().catch(() => ({ error: "Server error " + res.status }));
+            showBreakError(err.error || "Break action failed");
+            return;
         }
         updateStatusBadge();
     } catch (err) {
-        console.error("Break toggle request failed:", err);
+        showBreakError("Network error — check your connection");
     } finally {
         btn.disabled = false;
         btn.style.opacity = "1";
     }
+}
+
+function showBreakError(message) {
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        background: #dc3545; color: #fff; padding: 12px 24px; border-radius: 8px;
+        font-family: Arial, sans-serif; font-size: 14px; z-index: 99999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
 }
 
 function handleOpenOverview() {

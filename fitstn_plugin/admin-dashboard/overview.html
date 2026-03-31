@@ -26,6 +26,7 @@
         }
         .agent-card.status-active { border-left-color: #28a745; }
         .agent-card.status-idle { border-left-color: #ffc107; }
+        .agent-card.status-on_break { border-left-color: #6366f1; background: #f0f0ff; }
         .agent-card.idle-warning { border-left-color: #fd7e14; background: #fff8f0; }
         .agent-card.idle-critical { border-left-color: #dc3545; background: #fff5f5; animation: pulse 2s infinite; }
         .agent-card.session-exceeded { border-left-color: #dc3545; background: #fff5f5; animation: pulse 2s infinite; }
@@ -125,11 +126,28 @@
         .agent-nav { margin-bottom: 20px; }
         .agent-nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
         .agent-nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #28a745;
+            border-radius: 50%;
+            margin-left: 10px;
+            vertical-align: middle;
+            animation: livePulse 5s ease-in-out infinite;
+        }
+        @keyframes livePulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+            10% { transform: scale(1.5); box-shadow: 0 0 12px 5px rgba(40, 167, 69, 0.5); }
+            20% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1 id="page-title">Dashboard</h1>
+        <h1 id="page-title">Dashboard<span class="live-indicator"></span></h1>
         <div id="header-right">
             <nav id="admin-nav" style="display:inline;">
                 <a href="/overview.html" class="active">Overview</a>
@@ -315,7 +333,7 @@
         // =====================
         // LIVE OVERVIEW (admin only)
         // =====================
-        const statusLabels = { active: 'Active', idle: 'Idle', off_shift: 'Off Shift' };
+        const statusLabels = { active: 'Active', idle: 'Idle', on_break: 'On Break', off_shift: 'Off Shift' };
         let thresholdsCache = { warning: 5 * 60, critical: 10 * 60, maxSession: 30 * 60 };
 
         async function fetchThresholds() {
@@ -383,6 +401,11 @@
                             warningAgents.push(agentLabel);
                         }
                         detailsHtml = `<div class="card-detail"><strong>Idle for:</strong> ${formatDuration(idleSec)}</div>`;
+                    } else if (agent.status === 'on_break') {
+                        detailsHtml = `<div class="card-detail" style="color:#6366f1;"><strong>On Break</strong></div>`;
+                        if (agent.shift_break_seconds) {
+                            detailsHtml += `<div class="card-detail"><strong>Break time:</strong> ${formatDuration(agent.shift_break_seconds)}</div>`;
+                        }
                     }
 
                     let shiftHtml = '';
