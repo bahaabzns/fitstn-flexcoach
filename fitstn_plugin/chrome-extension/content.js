@@ -348,6 +348,10 @@ async function executeShiftEnd() {
     btn.disabled = true;
     btn.style.opacity = "0.6";
 
+    // Close active chat session before ending the shift
+    await closeSessionViaApi();
+    hideSessionPopup();
+
     try {
         const res = await fetch(API_BASE + "/api/agent/end-shift", {
             method: "POST",
@@ -473,6 +477,12 @@ async function handleBreakToggle() {
 
     const isOnBreak = btn.dataset.onBreak === "true";
     const endpoint = isOnBreak ? "/api/agent/end-break" : "/api/agent/start-break";
+
+    // Close active chat session before starting a break
+    if (!isOnBreak) {
+        await closeSessionViaApi();
+        hideSessionPopup();
+    }
 
     try {
         const res = await fetch(API_BASE + endpoint, {
