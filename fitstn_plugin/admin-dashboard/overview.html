@@ -909,8 +909,9 @@
 
                 const agentTotal = demandData.agents.reduce((sum, d) => sum + d.demand_count, 0);
                 const unassignedCount = demandData.unassigned_count || 0;
-                const grandTotal = agentTotal + unassignedCount;
-                totalLabel.textContent = `Total waiting rooms: ${grandTotal} (${agentTotal} assigned + ${unassignedCount} unassigned)`;
+                const otherStaffCount = demandData.other_staff_count || 0;
+                const globalTotal = demandData.global_total || 0;
+                totalLabel.textContent = `Total waiting rooms: ${globalTotal}`;
 
                 const sorted = [...demandData.agents].sort((a, b) => b.demand_count - a.demand_count);
 
@@ -926,6 +927,15 @@
                         </div>
                     `;
                 }).join('');
+
+                if (otherStaffCount > 0) {
+                    cardsHtml += `
+                        <div class="demand-card unassigned">
+                            <span class="demand-agent">Other Staff</span>
+                            <span class="demand-count">${otherStaffCount}</span>
+                        </div>
+                    `;
+                }
 
                 cardsHtml += `
                     <div class="demand-card unassigned">
