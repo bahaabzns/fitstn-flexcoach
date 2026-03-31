@@ -80,6 +80,11 @@ module.exports = function (requireAdmin) {
             `${CRM_BASE}/api/queue/list?sortBy=code&sortDirection=asc&page=1&limit=4000`,
             { headers: { Cookie: cookie } }
         );
+        const contentType = res.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+            const snippet = (await res.text()).substring(0, 200);
+            throw new Error(`CRM returned non-JSON (${res.status}). Likely auth failed. Response: ${snippet}`);
+        }
         if (!res.ok) throw new Error(`CRM API error: ${res.status} ${res.statusText}`);
         const json = await res.json();
         return Array.isArray(json) ? json : json.data || json.queueItems || json.items || json;
