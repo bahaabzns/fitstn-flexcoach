@@ -233,12 +233,15 @@ module.exports = function (sql, requireAgent) {
             `;
             const completedBreakSeconds = Number(breakData[0].total_seconds);
 
-            // Total completed session seconds within this shift
+            // Total completed session seconds within this shift (clamped to shift boundaries)
             const completedSessions = await sql`
-                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - clicked_at))), 0)::int AS total_seconds
+                SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM (
+                    LEAST(ended_at, NOW()) - GREATEST(clicked_at, ${shiftStartedAt})
+                )))), 0)::int AS total_seconds
                 FROM sessions
                 WHERE agent_id = ${agentId}
-                  AND clicked_at >= ${shiftStartedAt}
+                  AND clicked_at < NOW()
+                  AND ended_at > ${shiftStartedAt}
                   AND ended_at IS NOT NULL
             `;
             const completedActiveSeconds = Number(completedSessions[0].total_seconds);
@@ -259,10 +262,10 @@ module.exports = function (sql, requireAgent) {
                 });
             }
 
-            // Check for active chat session (compute duration server-side)
+            // Check for active chat session (clamped to shift start)
             const session = await sql`
                 SELECT id, chat_name,
-                    ROUND(EXTRACT(EPOCH FROM (NOW() - clicked_at)))::int AS chat_duration_seconds
+                    GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - GREATEST(clicked_at, ${shiftStartedAt})))))::int AS chat_duration_seconds
                 FROM sessions
                 WHERE agent_id = ${agentId} AND ended_at IS NULL
                 ORDER BY clicked_at DESC LIMIT 1
