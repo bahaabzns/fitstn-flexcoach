@@ -52,8 +52,18 @@ createStatusBadge();
 chrome.storage.local.get(["agentToken"], (result) => {
     currentToken = result.agentToken || null;
     if (currentToken) {
-        if (isChatPage) { attachClickHandlers(); attachMessageInterceptor(); startObserver(); interceptNavigationLinks(); }
-        startStatusPolling();
+        if (isChatPage) {
+            // Close any lingering session from before the reload, then attach handlers
+            closeSessionViaApi().then(() => {
+                attachClickHandlers();
+                attachMessageInterceptor();
+                startObserver();
+                interceptNavigationLinks();
+                startStatusPolling();
+            });
+        } else {
+            startStatusPolling();
+        }
     } else {
         showNotSignedIn();
     }
@@ -246,7 +256,7 @@ function createStatusBadge() {
         <div id="fc-session-card" style="display:none; align-items:center; gap:10px; padding:8px 16px; border-left:1px solid #334155;">
             <div id="fc-session-dot" style="width:10px; height:10px; background:#22c55e; border-radius:50%; flex-shrink:0; animation:fc-blink 1.5s infinite;"></div>
             <div>
-                <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; line-height:1;">Chat Duration</div>
+                <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; line-height:1;">Session Duration</div>
                 <div id="fc-session-timer" style="font-size:22px; font-weight:bold; color:#e2e8f0; font-variant-numeric:tabular-nums; line-height:1.2;">00:00</div>
             </div>
             <div id="fc-session-warning" style="display:none; font-size:11px; color:#fca5a5; font-weight:bold; margin-left:4px;"></div>
