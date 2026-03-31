@@ -450,7 +450,6 @@ app.post("/api/reset-database", requireAdmin, async (req, res) => {
         await sql`DELETE FROM salary_deductions`;
         await sql`DELETE FROM salary_overtime`;
         await sql`DELETE FROM salary_records`;
-        await sql`DELETE FROM auth_tokens`;
 
         console.log("Database reset by admin at", new Date().toISOString());
         res.json({ success: true, message: "All operational data has been cleared." });

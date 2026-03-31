@@ -252,11 +252,11 @@ function createStatusBadge() {
             <div id="fc-session-warning" style="display:none; font-size:11px; color:#fca5a5; font-weight:bold; margin-left:4px;"></div>
         </div>
         <div id="fc-actions" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-left:1px solid #334155;">
-            <button id="fc-btn-shift" onclick="document.dispatchEvent(new CustomEvent('fc-shift-toggle'))" style="padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#22c55e; color:#fff; white-space:nowrap;">Start Shift</button>
-            <button id="fc-btn-break" onclick="document.dispatchEvent(new CustomEvent('fc-break-toggle'))" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#6366f1; color:#fff; white-space:nowrap;">Take Break</button>
-            <button id="fc-btn-reopen" onclick="document.dispatchEvent(new CustomEvent('fc-reopen-shift'))" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#f59e0b; color:#fff; white-space:nowrap;">Reopen Shift</button>
-            <button id="fc-btn-overview" onclick="document.dispatchEvent(new CustomEvent('fc-open-overview'))" style="padding:6px 14px; border:1px solid #475569; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:transparent; color:#cbd5e1; white-space:nowrap;">My Overview</button>
-            <button id="fc-btn-signout" onclick="document.dispatchEvent(new CustomEvent('fc-sign-out'))" style="padding:6px 14px; border:1px solid #7f1d1d; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:#991b1b; color:#fca5a5; white-space:nowrap;">Sign Out</button>
+            <button id="fc-btn-shift" style="padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#22c55e; color:#fff; white-space:nowrap;">Start Shift</button>
+            <button id="fc-btn-break" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#6366f1; color:#fff; white-space:nowrap;">Take Break</button>
+            <button id="fc-btn-reopen" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#f59e0b; color:#fff; white-space:nowrap;">Reopen Shift</button>
+            <button id="fc-btn-overview" style="padding:6px 14px; border:1px solid #475569; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:transparent; color:#cbd5e1; white-space:nowrap;">My Overview</button>
+            <button id="fc-btn-signout" style="padding:6px 14px; border:1px solid #7f1d1d; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:#991b1b; color:#fca5a5; white-space:nowrap;">Sign Out</button>
         </div>
     `;
 
@@ -268,6 +268,13 @@ function createStatusBadge() {
     `;
     document.head.appendChild(style);
     document.body.appendChild(bar);
+
+    // Attach click listeners directly (inline onclick is blocked by page CSP)
+    document.getElementById("fc-btn-shift").addEventListener("click", handleShiftToggle);
+    document.getElementById("fc-btn-break").addEventListener("click", handleBreakToggle);
+    document.getElementById("fc-btn-reopen").addEventListener("click", handleReopenShift);
+    document.getElementById("fc-btn-overview").addEventListener("click", handleOpenOverview);
+    document.getElementById("fc-btn-signout").addEventListener("click", handleSignOut);
 }
 
 function removeStatusBadge() {
@@ -310,12 +317,14 @@ async function executeShiftStart() {
             headers: { Authorization: "Bearer " + currentToken },
         });
         if (!res.ok) {
-            const err = await res.json();
-            console.error("Start shift failed:", err.error || "Unknown error");
+            const err = await res.json().catch(() => ({ error: "Server error " + res.status }));
+            showBreakError(err.error || "Failed to start shift");
+            return;
         }
         clearReopenTimer();
         updateStatusBadge();
     } catch (err) {
+        showBreakError("Network error — could not start shift");
         console.error("Start shift request failed:", err);
     } finally {
         btn.disabled = false;
@@ -565,12 +574,6 @@ function updateActionButtons(isSignedIn, isOnShift, isOnBreak) {
         clearReopenTimer();
     }
 }
-
-document.addEventListener("fc-shift-toggle", handleShiftToggle);
-document.addEventListener("fc-break-toggle", handleBreakToggle);
-document.addEventListener("fc-reopen-shift", handleReopenShift);
-document.addEventListener("fc-open-overview", handleOpenOverview);
-document.addEventListener("fc-sign-out", handleSignOut);
 
 async function updateStatusBadge() {
     if (!currentToken) return;
