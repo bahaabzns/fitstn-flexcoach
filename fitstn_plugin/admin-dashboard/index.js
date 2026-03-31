@@ -379,48 +379,75 @@ app.get("/api/agent-demand", requireAdmin, async (req, res) => {
 
         await ensureSupabaseAuth();
 
-        const demandResults = await Promise.all(
-            agents.map(async (agent) => {
-                try {
-                    const { data, error } = await supabase.rpc("get_chat_rooms_paginated", {
-                        p_assigned_staff_id: agent.fitstn_id,
-                        p_client_gender: null,
-                        p_coach_id: null,
-                        p_ghost_days: null,
-                        p_ghost_only: false,
-                        p_last_interaction: null,
-                        p_last_interaction_from: null,
-                        p_last_interaction_to: null,
-                        p_last_message_from: "client",
-                        p_limit: 1,
-                        p_no_assigned_staff: false,
-                        p_offset: 0,
-                        p_package_id: null,
-                        p_search: null,
-                        p_staff_id: null,
-                        p_subscription_start_date: null,
-                        p_subscription_start_weekday: null,
-                        p_subscription_status: null,
-                        p_subscription_t_status: null,
-                        p_tenant_id: "fitstn",
-                        p_unread_only: false,
-                    });
+        // Fetch per-agent demand + unassigned rooms in parallel
+        const unassignedPromise = supabase.rpc("get_chat_rooms_paginated", {
+            p_assigned_staff_id: null,
+            p_client_gender: null,
+            p_coach_id: null,
+            p_ghost_days: null,
+            p_ghost_only: false,
+            p_last_interaction: null,
+            p_last_interaction_from: null,
+            p_last_interaction_to: null,
+            p_last_message_from: "client",
+            p_limit: 1,
+            p_no_assigned_staff: true,
+            p_offset: 0,
+            p_package_id: null,
+            p_search: null,
+            p_staff_id: null,
+            p_subscription_start_date: null,
+            p_subscription_start_weekday: null,
+            p_subscription_status: null,
+            p_subscription_t_status: null,
+            p_tenant_id: "fitstn",
+            p_unread_only: false,
+        });
 
-                    if (error) {
-                        console.error(`Demand fetch failed for ${agent.name}:`, error.message);
-                        return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: error.message };
-                    }
+        const agentPromises = agents.map(async (agent) => {
+            try {
+                const { data, error } = await supabase.rpc("get_chat_rooms_paginated", {
+                    p_assigned_staff_id: agent.fitstn_id,
+                    p_client_gender: null,
+                    p_coach_id: null,
+                    p_ghost_days: null,
+                    p_ghost_only: false,
+                    p_last_interaction: null,
+                    p_last_interaction_from: null,
+                    p_last_interaction_to: null,
+                    p_last_message_from: "client",
+                    p_limit: 1,
+                    p_no_assigned_staff: false,
+                    p_offset: 0,
+                    p_package_id: null,
+                    p_search: null,
+                    p_staff_id: null,
+                    p_subscription_start_date: null,
+                    p_subscription_start_weekday: null,
+                    p_subscription_status: null,
+                    p_subscription_t_status: null,
+                    p_tenant_id: "fitstn",
+                    p_unread_only: false,
+                });
 
-                    const totalCount = data?.total || 0;
-                    return { agent_id: agent.id, agent_name: agent.name, demand_count: totalCount };
-                } catch (err) {
-                    console.error(`Demand fetch error for ${agent.name}:`, err.message);
-                    return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: err.message };
+                if (error) {
+                    console.error(`Demand fetch failed for ${agent.name}:`, error.message);
+                    return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: error.message };
                 }
-            })
-        );
 
-        res.json(demandResults);
+                const totalCount = data?.total || 0;
+                return { agent_id: agent.id, agent_name: agent.name, demand_count: totalCount };
+            } catch (err) {
+                console.error(`Demand fetch error for ${agent.name}:`, err.message);
+                return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: err.message };
+            }
+        });
+
+        const [unassignedResult, ...demandResults] = await Promise.all([unassignedPromise, ...agentPromises]);
+
+        const unassignedCount = unassignedResult.data?.total || 0;
+
+        res.json({ agents: demandResults, unassigned_count: unassignedCount });
     } catch (err) {
         console.error("GET /api/agent-demand error:", err.message);
         supabaseAuthenticated = false;

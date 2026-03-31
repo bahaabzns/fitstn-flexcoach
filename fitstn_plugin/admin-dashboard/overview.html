@@ -160,6 +160,8 @@
         .demand-card.medium-demand .demand-count { color: #fd7e14; }
         .demand-card.no-demand { border-left-color: #28a745; }
         .demand-card.no-demand .demand-count { color: #28a745; }
+        .demand-card.unassigned { border-left-color: #6c757d; background: #f8f8f8; }
+        .demand-card.unassigned .demand-count { color: #6c757d; }
         .demand-total { font-size: 14px; color: #555; margin-bottom: 12px; }
     </style>
 </head>
@@ -898,19 +900,21 @@
                 const res = await authFetch("/api/agent-demand");
                 const demandData = await res.json();
 
-                if (!Array.isArray(demandData) || demandData.length === 0) {
+                if (!demandData.agents || demandData.agents.length === 0) {
                     container.innerHTML = '<div class="empty">No agents with Fitstn ID configured. Set it in the Agents page.</div>';
                     totalLabel.textContent = '';
                     refreshTime.textContent = '';
                     return;
                 }
 
-                const totalDemand = demandData.reduce((sum, d) => sum + d.demand_count, 0);
-                totalLabel.textContent = `Total waiting rooms: ${totalDemand}`;
+                const agentTotal = demandData.agents.reduce((sum, d) => sum + d.demand_count, 0);
+                const unassignedCount = demandData.unassigned_count || 0;
+                const grandTotal = agentTotal + unassignedCount;
+                totalLabel.textContent = `Total waiting rooms: ${grandTotal} (${agentTotal} assigned + ${unassignedCount} unassigned)`;
 
-                const sorted = [...demandData].sort((a, b) => b.demand_count - a.demand_count);
+                const sorted = [...demandData.agents].sort((a, b) => b.demand_count - a.demand_count);
 
-                container.innerHTML = sorted.map(d => {
+                let cardsHtml = sorted.map(d => {
                     let demandClass = 'no-demand';
                     if (d.demand_count >= 20) demandClass = 'high-demand';
                     else if (d.demand_count >= 10) demandClass = 'medium-demand';
@@ -922,6 +926,15 @@
                         </div>
                     `;
                 }).join('');
+
+                cardsHtml += `
+                    <div class="demand-card unassigned">
+                        <span class="demand-agent">Unassigned</span>
+                        <span class="demand-count">${unassignedCount}</span>
+                    </div>
+                `;
+
+                container.innerHTML = cardsHtml;
 
                 refreshTime.textContent = '(updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ')';
             } catch (err) {
