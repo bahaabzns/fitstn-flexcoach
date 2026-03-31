@@ -47,6 +47,7 @@ const shiftRoutes = require("./routes/shifts")(sql, requireAgent);
 const salaryRoutes = require("./routes/salaries")(sql, requireAdmin);
 const agentOverviewRoutes = require("./routes/agent-overview")(sql);
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
+const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin);
 
 app.use(cors({ origin: "*", allowedHeaders: ["Content-Type", "Authorization"] }));
 app.use(express.json());
@@ -61,6 +62,7 @@ app.use("/api/agent", shiftRoutes);
 app.use("/api/salaries", salaryRoutes);
 app.use("/api/agent-overview", agentOverviewRoutes);
 app.use("/api", activityEventRoutes);
+app.use("/api/staff-assignator", staffAssignatorRoutes);
 
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "login.html"));
