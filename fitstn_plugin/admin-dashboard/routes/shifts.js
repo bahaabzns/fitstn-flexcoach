@@ -5,11 +5,17 @@ module.exports = function (sql, requireAgent) {
 
     router.post("/start-shift", requireAgent, async (req, res) => {
         try {
-            const existing = await sql`
-                SELECT id FROM shifts WHERE agent_id = ${req.user.id} AND shift_ended_at IS NULL
+            const existingToday = await sql`
+                SELECT id, shift_ended_at FROM shifts
+                WHERE agent_id = ${req.user.id}
+                AND DATE(shift_started_at) = CURRENT_DATE
             `;
-            if (existing.length > 0) {
+            const hasActiveShift = existingToday.some(s => !s.shift_ended_at);
+            if (hasActiveShift) {
                 return res.status(400).json({ error: "Shift already active" });
+            }
+            if (existingToday.length > 0) {
+                return res.status(400).json({ error: "Only one shift per day is allowed. You already had a shift today." });
             }
 
             const result = await sql`
