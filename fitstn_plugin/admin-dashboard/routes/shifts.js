@@ -202,7 +202,9 @@ module.exports = function (sql, requireAgent) {
         try {
             const agentId = req.user.id;
             const shift = await sql`
-                SELECT id, shift_started_at FROM shifts
+                SELECT id, shift_started_at,
+                    ROUND(EXTRACT(EPOCH FROM (NOW() - shift_started_at)))::int AS shift_duration_seconds
+                FROM shifts
                 WHERE agent_id = ${agentId} AND shift_ended_at IS NULL
                 ORDER BY shift_started_at DESC LIMIT 1
             `;
@@ -212,78 +214,97 @@ module.exports = function (sql, requireAgent) {
 
             const shiftId = shift[0].id;
             const shiftStartedAt = shift[0].shift_started_at;
+            const shiftDurationSeconds = shift[0].shift_duration_seconds;
 
-            // Check for active break
+            // Check for active break (compute duration server-side)
             const activeBreak = await sql`
-                SELECT id, started_at FROM shift_breaks
+                SELECT id, started_at,
+                    ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)))::int AS current_break_seconds
+                FROM shift_breaks
                 WHERE shift_id = ${shiftId} AND ended_at IS NULL
                 LIMIT 1
             `;
 
-            // Total break seconds for this shift (completed breaks only)
+            // Total completed break seconds for this shift
             const breakData = await sql`
-                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))), 0) AS total_seconds
+                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))), 0)::int AS total_seconds
                 FROM shift_breaks
                 WHERE shift_id = ${shiftId} AND ended_at IS NOT NULL
             `;
-            const totalBreakSeconds = Math.round(Number(breakData[0].total_seconds));
+            const completedBreakSeconds = Number(breakData[0].total_seconds);
 
-            // Fetch session data before checking break status (needed for all statuses)
+            // Total completed session seconds within this shift
             const completedSessions = await sql`
-                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - clicked_at))), 0) AS total_seconds
+                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - clicked_at))), 0)::int AS total_seconds
                 FROM sessions
                 WHERE agent_id = ${agentId}
                   AND clicked_at >= ${shiftStartedAt}
                   AND ended_at IS NOT NULL
             `;
-            const completedActiveSeconds = Math.round(Number(completedSessions[0].total_seconds));
+            const completedActiveSeconds = Number(completedSessions[0].total_seconds);
 
-            // If on break, return with on_break status (includes real active seconds)
+            // On break — return pre-computed durations
             if (activeBreak.length > 0) {
-                const currentBreakSeconds = Math.round((Date.now() - new Date(activeBreak[0].started_at).getTime()) / 1000);
+                const currentBreakSeconds = activeBreak[0].current_break_seconds;
+                const totalBreakSeconds = completedBreakSeconds + currentBreakSeconds;
+                const idleSeconds = Math.max(0, shiftDurationSeconds - completedActiveSeconds - totalBreakSeconds);
                 return res.json({
                     status: "on_break",
-                    break_started_at: activeBreak[0].started_at,
                     shift_started_at: shiftStartedAt,
-                    total_break_seconds: totalBreakSeconds + currentBreakSeconds,
+                    shift_duration_seconds: shiftDurationSeconds,
+                    current_break_seconds: currentBreakSeconds,
+                    total_break_seconds: totalBreakSeconds,
                     total_active_seconds: completedActiveSeconds,
+                    idle_duration_seconds: idleSeconds,
                 });
             }
 
+            // Check for active chat session (compute duration server-side)
             const session = await sql`
-                SELECT id, chat_name, clicked_at FROM sessions
+                SELECT id, chat_name,
+                    ROUND(EXTRACT(EPOCH FROM (NOW() - clicked_at)))::int AS chat_duration_seconds
+                FROM sessions
                 WHERE agent_id = ${agentId} AND ended_at IS NULL
                 ORDER BY clicked_at DESC LIMIT 1
             `;
 
             if (session.length > 0) {
-                const currentSessionSeconds = Math.round((Date.now() - new Date(session[0].clicked_at).getTime()) / 1000);
-                const totalActiveSeconds = completedActiveSeconds + currentSessionSeconds;
+                const chatDurationSeconds = session[0].chat_duration_seconds;
+                const totalActiveSeconds = completedActiveSeconds + chatDurationSeconds;
+                const totalBreakSeconds = completedBreakSeconds;
+                const idleSeconds = Math.max(0, shiftDurationSeconds - totalActiveSeconds - totalBreakSeconds);
                 return res.json({
                     status: "active",
                     chat_name: session[0].chat_name,
-                    chat_started_at: session[0].clicked_at,
                     shift_started_at: shiftStartedAt,
+                    shift_duration_seconds: shiftDurationSeconds,
+                    chat_duration_seconds: chatDurationSeconds,
                     total_active_seconds: totalActiveSeconds,
                     total_break_seconds: totalBreakSeconds,
+                    idle_duration_seconds: idleSeconds,
                 });
             }
 
             // Idle: on shift but no active session and not on break
             const lastSession = await sql`
-                SELECT ended_at FROM sessions
+                SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - ended_at)))::int AS idle_since_seconds
+                FROM sessions
                 WHERE agent_id = ${agentId} AND ended_at IS NOT NULL
                 ORDER BY ended_at DESC LIMIT 1
             `;
-            const shiftStart = new Date(shiftStartedAt);
-            const lastEnded = lastSession.length > 0 ? new Date(lastSession[0].ended_at) : null;
-            const idleSince = lastEnded && lastEnded > shiftStart ? lastEnded : shiftStart;
+            const idleSinceSeconds = lastSession.length > 0
+                ? Math.min(lastSession[0].idle_since_seconds, shiftDurationSeconds)
+                : shiftDurationSeconds;
+            const totalBreakSeconds = completedBreakSeconds;
+            const idleSeconds = Math.max(0, shiftDurationSeconds - completedActiveSeconds - totalBreakSeconds);
             return res.json({
                 status: "idle",
-                idle_since: idleSince.toISOString(),
                 shift_started_at: shiftStartedAt,
+                shift_duration_seconds: shiftDurationSeconds,
+                idle_since_seconds: idleSinceSeconds,
                 total_active_seconds: completedActiveSeconds,
                 total_break_seconds: totalBreakSeconds,
+                idle_duration_seconds: idleSeconds,
             });
         } catch (err) {
             res.status(500).json({ error: "Failed to fetch status", details: err.message });

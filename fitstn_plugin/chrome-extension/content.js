@@ -7,7 +7,6 @@ const API_BASE = "https://fitstn-flexcoach.onrender.com";
 let currentToken = null;
 let observer = null;
 let sessionTimer = null;
-let sessionStartTime = null;
 let maxSessionSeconds = 30 * 60; // default 30 min, updated from server
 let statusInterval = null;
 let messageInterceptorAttached = false;
@@ -620,16 +619,13 @@ async function updateStatusBadge() {
         label.textContent = STATUS_LABELS[data.status] || data.status;
 
         if (data.status === "active") {
-            const chatSec = Math.round((Date.now() - new Date(data.chat_started_at).getTime()) / 1000);
-            detail.textContent = (data.chat_name || "Unknown") + " · " + formatStatusDuration(chatSec);
+            detail.textContent = (data.chat_name || "Unknown") + " · " + formatStatusDuration(data.chat_duration_seconds || 0);
             detail.style.display = "inline";
         } else if (data.status === "idle") {
-            const idleSec = Math.round((Date.now() - new Date(data.idle_since).getTime()) / 1000);
-            detail.textContent = "Idle for " + formatStatusDuration(idleSec);
+            detail.textContent = "Idle for " + formatStatusDuration(data.idle_since_seconds || 0);
             detail.style.display = "inline";
         } else if (data.status === "on_break") {
-            const breakSec = Math.round((Date.now() - new Date(data.break_started_at).getTime()) / 1000);
-            detail.textContent = "Break for " + formatStatusDuration(breakSec);
+            detail.textContent = "Break for " + formatStatusDuration(data.current_break_seconds || 0);
             detail.style.display = "inline";
         } else {
             detail.style.display = "none";
@@ -640,26 +636,21 @@ async function updateStatusBadge() {
         const isSessionVisible = sessionCard && sessionCard.style.display !== "none";
 
         if (data.status === "active" && !isSessionVisible && isChatPage) {
-            showSessionPopup(new Date(data.chat_started_at).getTime());
+            showSessionPopup(data.chat_duration_seconds || 0);
             if (!currentSessionId) startIdleDetection();
         } else if (data.status !== "active" && isSessionVisible) {
             hideSessionPopup();
         }
 
-        // Show shift time stats when on shift
-        const isOnShift = !!data.shift_started_at;
+        // Show shift time stats when on shift (all durations from server)
+        const isOnShift = !!data.shift_duration_seconds;
         const isOnBreak = data.status === "on_break";
         if (isOnShift && shiftTimesContainer) {
-            const shiftSeconds = Math.round((Date.now() - new Date(data.shift_started_at).getTime()) / 1000);
-            const activeSeconds = data.total_active_seconds || 0;
-            const breakSeconds = data.total_break_seconds || 0;
-            const idleSeconds = Math.max(0, shiftSeconds - activeSeconds - breakSeconds);
-
             const timeBreak = document.getElementById("fc-time-break");
-            timeShift.textContent = formatStatusDuration(shiftSeconds);
-            timeActive.textContent = formatStatusDuration(activeSeconds);
-            timeIdle.textContent = formatStatusDuration(idleSeconds);
-            if (timeBreak) timeBreak.textContent = formatStatusDuration(breakSeconds);
+            timeShift.textContent = formatStatusDuration(data.shift_duration_seconds || 0);
+            timeActive.textContent = formatStatusDuration(data.total_active_seconds || 0);
+            timeIdle.textContent = formatStatusDuration(data.idle_duration_seconds || 0);
+            if (timeBreak) timeBreak.textContent = formatStatusDuration(data.total_break_seconds || 0);
             shiftTimesContainer.style.display = "flex";
         } else if (shiftTimesContainer) {
             shiftTimesContainer.style.display = "none";
@@ -719,10 +710,11 @@ function fetchMaxSessionThreshold() {
         .catch(() => {});
 }
 
-function showSessionPopup(startTimeOverride) {
+function showSessionPopup(initialElapsedSeconds) {
     const card = getSessionCard();
     if (!card) return;
-    sessionStartTime = startTimeOverride || Date.now();
+    const serverAnchorTime = Date.now();
+    const serverElapsedSeconds = initialElapsedSeconds || 0;
     card.style.display = "flex";
 
     // Reset warning state
@@ -738,7 +730,8 @@ function showSessionPopup(startTimeOverride) {
 
     if (sessionTimer) clearInterval(sessionTimer);
     sessionTimer = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
+        const localTickSeconds = Math.floor((Date.now() - serverAnchorTime) / 1000);
+        const elapsed = serverElapsedSeconds + localTickSeconds;
         const h = Math.floor(elapsed / 3600);
         const m = Math.floor((elapsed % 3600) / 60);
         const s = elapsed % 60;
