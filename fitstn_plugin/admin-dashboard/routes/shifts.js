@@ -66,6 +66,41 @@ module.exports = function (sql, requireAgent) {
         }
     });
 
+    const REOPEN_GRACE_PERIOD_MINUTES = 5;
+
+    router.post("/reopen-shift", requireAgent, async (req, res) => {
+        try {
+            const recentlyEnded = await sql`
+                SELECT id, shift_started_at, shift_ended_at
+                FROM shifts
+                WHERE agent_id = ${req.user.id}
+                AND DATE(shift_started_at) = CURRENT_DATE
+                AND shift_ended_at IS NOT NULL
+                AND shift_ended_at > NOW() - INTERVAL '${sql.unsafe(String(REOPEN_GRACE_PERIOD_MINUTES))} minutes'
+                ORDER BY shift_ended_at DESC
+                LIMIT 1
+            `;
+            if (recentlyEnded.length === 0) {
+                return res.status(400).json({ error: "No recently ended shift to reopen. Grace period is " + REOPEN_GRACE_PERIOD_MINUTES + " minutes." });
+            }
+
+            const result = await sql`
+                UPDATE shifts SET shift_ended_at = NULL
+                WHERE id = ${recentlyEnded[0].id}
+                RETURNING *
+            `;
+
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
+                VALUES (${req.user.id}, 'shift_reopened', ${result[0].id}, '{"reason": "agent_reopened"}'::jsonb)
+            `;
+
+            res.json({ success: true, shift: result[0] });
+        } catch (err) {
+            res.status(500).json({ error: "Failed to reopen shift", details: err.message });
+        }
+    });
+
     router.post("/start-break", requireAgent, async (req, res) => {
         try {
             const activeShift = await sql`

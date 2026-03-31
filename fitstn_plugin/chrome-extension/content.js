@@ -246,6 +246,7 @@ function createStatusBadge() {
         <div id="fc-actions" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-left:1px solid #334155;">
             <button id="fc-btn-shift" onclick="document.dispatchEvent(new CustomEvent('fc-shift-toggle'))" style="padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#22c55e; color:#fff; white-space:nowrap;">Start Shift</button>
             <button id="fc-btn-break" onclick="document.dispatchEvent(new CustomEvent('fc-break-toggle'))" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#6366f1; color:#fff; white-space:nowrap;">Take Break</button>
+            <button id="fc-btn-reopen" onclick="document.dispatchEvent(new CustomEvent('fc-reopen-shift'))" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#f59e0b; color:#fff; white-space:nowrap;">Reopen Shift</button>
             <button id="fc-btn-overview" onclick="document.dispatchEvent(new CustomEvent('fc-open-overview'))" style="padding:6px 14px; border:1px solid #475569; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:transparent; color:#cbd5e1; white-space:nowrap;">My Overview</button>
             <button id="fc-btn-signout" onclick="document.dispatchEvent(new CustomEvent('fc-sign-out'))" style="padding:6px 14px; border:1px solid #7f1d1d; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:#991b1b; color:#fca5a5; white-space:nowrap;">Sign Out</button>
         </div>
@@ -268,30 +269,168 @@ function removeStatusBadge() {
     if (barStyles) barStyles.remove();
 }
 
+let reopenShiftTimer = null;
+let shiftEndedAt = null;
+const REOPEN_GRACE_MINUTES = 5;
+
 /* ───────── Top Bar Button Handlers ───────── */
 
 async function handleShiftToggle() {
     if (!currentToken) return;
     const btn = document.getElementById("fc-btn-shift");
     if (!btn) return;
+
+    const isOnShift = btn.dataset.onShift === "true";
+
+    if (isOnShift) {
+        showEndShiftConfirmation();
+        return;
+    }
+
+    await executeShiftStart();
+}
+
+async function executeShiftStart() {
+    const btn = document.getElementById("fc-btn-shift");
+    if (!btn) return;
     btn.disabled = true;
     btn.style.opacity = "0.6";
 
-    const isOnShift = btn.dataset.onShift === "true";
-    const endpoint = isOnShift ? "/api/agent/end-shift" : "/api/agent/start-shift";
-
     try {
-        const res = await fetch(API_BASE + endpoint, {
+        const res = await fetch(API_BASE + "/api/agent/start-shift", {
             method: "POST",
             headers: { Authorization: "Bearer " + currentToken },
         });
         if (!res.ok) {
             const err = await res.json();
-            console.error("Shift toggle failed:", err.error || "Unknown error");
+            console.error("Start shift failed:", err.error || "Unknown error");
+        }
+        clearReopenTimer();
+        updateStatusBadge();
+    } catch (err) {
+        console.error("Start shift request failed:", err);
+    } finally {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+    }
+}
+
+async function executeShiftEnd() {
+    const btn = document.getElementById("fc-btn-shift");
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+
+    try {
+        const res = await fetch(API_BASE + "/api/agent/end-shift", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + currentToken },
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            console.error("End shift failed:", err.error || "Unknown error");
+        } else {
+            startReopenTimer();
         }
         updateStatusBadge();
     } catch (err) {
-        console.error("Shift toggle request failed:", err);
+        console.error("End shift request failed:", err);
+    } finally {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+    }
+}
+
+function showEndShiftConfirmation() {
+    const existing = document.getElementById("fc-end-shift-confirmation");
+    if (existing) existing.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "fc-end-shift-confirmation";
+    overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.5); z-index: 999999;
+        display: flex; align-items: center; justify-content: center;
+        font-family: Arial, sans-serif;
+    `;
+
+    const modal = document.createElement("div");
+    modal.style.cssText = `
+        background: #fff; border-radius: 12px; padding: 24px 28px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.2); max-width: 400px; width: 90%;
+        text-align: center;
+    `;
+    modal.innerHTML = `
+        <div style="font-size: 40px; margin-bottom: 12px;">&#9888;</div>
+        <h3 style="margin: 0 0 8px; font-size: 18px; color: #333;">End Your Shift?</h3>
+        <p style="margin: 0 0 20px; font-size: 14px; color: #666; line-height: 1.5;">
+            Are you sure you want to end your shift? If this is a mistake, you can reopen it within <strong>${REOPEN_GRACE_MINUTES} minutes</strong>.
+        </p>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+            <button id="fc-confirm-cancel-end" style="
+                padding: 10px 24px; border-radius: 8px; border: 1.5px solid #ddd;
+                background: #fff; color: #333; font-size: 14px; font-weight: 600;
+                cursor: pointer;
+            ">Cancel</button>
+            <button id="fc-confirm-end-shift" style="
+                padding: 10px 24px; border-radius: 8px; border: none;
+                background: #dc3545; color: #fff; font-size: 14px; font-weight: 600;
+                cursor: pointer;
+            ">End Shift</button>
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    document.getElementById("fc-confirm-cancel-end").addEventListener("click", () => overlay.remove());
+    document.getElementById("fc-confirm-end-shift").addEventListener("click", () => {
+        overlay.remove();
+        executeShiftEnd();
+    });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+/* ───────── Reopen Shift (grace period) ───────── */
+
+function startReopenTimer() {
+    clearReopenTimer();
+    shiftEndedAt = Date.now();
+    const reopenBtn = document.getElementById("fc-btn-reopen");
+    if (reopenBtn) reopenBtn.style.display = "inline-block";
+    reopenShiftTimer = setTimeout(() => {
+        clearReopenTimer();
+        updateStatusBadge();
+    }, REOPEN_GRACE_MINUTES * 60 * 1000);
+}
+
+function clearReopenTimer() {
+    if (reopenShiftTimer) { clearTimeout(reopenShiftTimer); reopenShiftTimer = null; }
+    shiftEndedAt = null;
+    const reopenBtn = document.getElementById("fc-btn-reopen");
+    if (reopenBtn) reopenBtn.style.display = "none";
+}
+
+async function handleReopenShift() {
+    if (!currentToken) return;
+    const btn = document.getElementById("fc-btn-reopen");
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+
+    try {
+        const res = await fetch(API_BASE + "/api/agent/reopen-shift", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + currentToken },
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            showBreakError(err.error || "Failed to reopen shift");
+        }
+        clearReopenTimer();
+        updateStatusBadge();
+    } catch (err) {
+        showBreakError("Network error — could not reopen shift");
     } finally {
         btn.disabled = false;
         btn.style.opacity = "1";
@@ -371,6 +510,7 @@ function updateActionButtons(isSignedIn, isOnShift, isOnBreak) {
     const actionsContainer = document.getElementById("fc-actions");
     const shiftBtn = document.getElementById("fc-btn-shift");
     const breakBtn = document.getElementById("fc-btn-break");
+    const reopenBtn = document.getElementById("fc-btn-reopen");
     if (!actionsContainer) return;
 
     actionsContainer.style.display = isSignedIn ? "flex" : "none";
@@ -405,10 +545,16 @@ function updateActionButtons(isSignedIn, isOnShift, isOnBreak) {
             breakBtn.style.display = "none";
         }
     }
+
+    // Hide Reopen button when back on shift
+    if (reopenBtn && isOnShift) {
+        clearReopenTimer();
+    }
 }
 
 document.addEventListener("fc-shift-toggle", handleShiftToggle);
 document.addEventListener("fc-break-toggle", handleBreakToggle);
+document.addEventListener("fc-reopen-shift", handleReopenShift);
 document.addEventListener("fc-open-overview", handleOpenOverview);
 document.addEventListener("fc-sign-out", handleSignOut);
 
