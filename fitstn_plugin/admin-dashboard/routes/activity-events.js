@@ -7,6 +7,7 @@ const ALLOWED_EVENT_TYPES = [
     "shift_started",
     "shift_ended",
     "shift_reopened",
+    "shift_adjusted",
     "break_started",
     "break_resumed",
     "idle_started",

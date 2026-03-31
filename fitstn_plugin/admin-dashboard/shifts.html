@@ -20,6 +20,21 @@
         .badge-active { background: #d4edda; color: #155724; }
         .badge-ended { background: #e2e3e5; color: #383d41; }
 
+        .btn-edit { padding: 4px 10px; border: 1px solid #6c757d; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; color: #333; }
+        .btn-edit:hover { background: #f0f0f0; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; display: flex; align-items: center; justify-content: center; }
+        .modal-box { background: #fff; border-radius: 12px; padding: 24px 28px; box-shadow: 0 8px 30px rgba(0,0,0,0.2); max-width: 440px; width: 90%; }
+        .modal-box h3 { margin: 0 0 16px; font-size: 18px; color: #333; }
+        .modal-box label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; margin-top: 12px; }
+        .modal-box input, .modal-box textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+        .modal-box textarea { resize: vertical; min-height: 60px; }
+        .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+        .modal-actions button { padding: 8px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .btn-cancel { border: 1px solid #ddd; background: #fff; color: #333; }
+        .btn-save { border: none; background: #333; color: #fff; }
+        .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+        .modal-error { color: #dc3545; font-size: 13px; margin-top: 8px; display: none; }
+
         .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
         .toolbar .field { min-width: 160px; }
         .toolbar label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
@@ -93,10 +108,11 @@
                 <th>Break</th>
                 <th>Idle</th>
                 <th>Status</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody id="shifts-body">
-            <tr><td colspan="8" class="empty">Loading...</td></tr>
+            <tr><td colspan="9" class="empty">Loading...</td></tr>
         </tbody>
     </table>
     <script>
@@ -157,7 +173,7 @@
                 renderPeriodLabel(response.period);
                 const data = response.shifts;
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8" class="empty">No shifts for this period.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" class="empty">No shifts for this period.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = data.map(row => {
@@ -167,6 +183,8 @@
                         : formatDuration(row.duration_seconds);
                     const breakDuration = row.break_seconds != null ? formatDuration(row.break_seconds) : '-';
                     const idleDuration = row.idle_seconds != null ? formatDuration(row.idle_seconds) : '-';
+                    const startedIso = new Date(row.shift_started_at).toISOString().slice(0, 16);
+                    const endedIso = row.shift_ended_at ? new Date(row.shift_ended_at).toISOString().slice(0, 16) : '';
                     return `
                         <tr>
                             <td>${row.id}</td>
@@ -177,16 +195,86 @@
                             <td>${breakDuration}</td>
                             <td>${idleDuration}</td>
                             <td><span class="badge ${isActive ? 'badge-active' : 'badge-ended'}">${isActive ? 'Active' : 'Ended'}</span></td>
+                            <td><button class="btn-edit" onclick="openEditModal(${row.id}, '${startedIso}', '${endedIso}')">Edit</button></td>
                         </tr>
                     `;
                 }).join("");
             } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="8" class="empty">Failed to load shifts.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="empty">Failed to load shifts.</td></tr>';
             }
         }
         document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);
         loadShifts();
         setInterval(loadShifts, 5000);
+
+        /* ───────── Edit Shift Modal ───────── */
+
+        function openEditModal(shiftId, startedAt, endedAt) {
+            const existing = document.getElementById('edit-shift-modal');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'edit-shift-modal';
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal-box">
+                    <h3>Edit Shift #${shiftId}</h3>
+                    <label for="edit-start">Started At</label>
+                    <input type="datetime-local" id="edit-start" value="${startedAt}">
+                    <label for="edit-end">Ended At (leave empty for active shift)</label>
+                    <input type="datetime-local" id="edit-end" value="${endedAt}">
+                    <label for="edit-reason">Reason for adjustment *</label>
+                    <textarea id="edit-reason" placeholder="e.g. Agent forgot to clock out"></textarea>
+                    <div id="edit-error" class="modal-error"></div>
+                    <div class="modal-actions">
+                        <button class="btn-cancel" id="edit-cancel">Cancel</button>
+                        <button class="btn-save" id="edit-save">Save</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            document.getElementById('edit-cancel').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+            document.getElementById('edit-save').addEventListener('click', async () => {
+                const startVal = document.getElementById('edit-start').value;
+                const endVal = document.getElementById('edit-end').value;
+                const reason = document.getElementById('edit-reason').value.trim();
+                const errorEl = document.getElementById('edit-error');
+                const saveBtn = document.getElementById('edit-save');
+
+                if (!startVal) { errorEl.textContent = 'Start time is required'; errorEl.style.display = 'block'; return; }
+                if (!reason || reason.length < 3) { errorEl.textContent = 'Reason is required (at least 3 characters)'; errorEl.style.display = 'block'; return; }
+
+                saveBtn.disabled = true;
+                errorEl.style.display = 'none';
+
+                try {
+                    const body = { shift_started_at: startVal, reason };
+                    if (endVal) body.shift_ended_at = endVal;
+
+                    const res = await authFetch('/api/shifts/' + shiftId, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        errorEl.textContent = data.error || 'Failed to update shift';
+                        errorEl.style.display = 'block';
+                        saveBtn.disabled = false;
+                        return;
+                    }
+                    overlay.remove();
+                    loadShifts();
+                } catch (err) {
+                    errorEl.textContent = 'Network error — check your connection';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = false;
+                }
+            });
+        }
     </script>
 </body>
 </html>
