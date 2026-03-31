@@ -73,12 +73,13 @@
                 <th>Started At</th>
                 <th>Ended At</th>
                 <th>Duration</th>
+                <th>Break</th>
                 <th>Idle</th>
                 <th>Status</th>
             </tr>
         </thead>
         <tbody id="shifts-body">
-            <tr><td colspan="7" class="empty">Loading...</td></tr>
+            <tr><td colspan="8" class="empty">Loading...</td></tr>
         </tbody>
     </table>
     <script>
@@ -139,7 +140,7 @@
                 renderPeriodLabel(response.period);
                 const data = response.shifts;
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="empty">No shifts for this period.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" class="empty">No shifts for this period.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = data.map(row => {
@@ -147,6 +148,7 @@
                     const duration = isActive
                         ? formatDuration(Math.round((Date.now() - new Date(row.shift_started_at).getTime()) / 1000))
                         : formatDuration(row.duration_seconds);
+                    const breakDuration = row.break_seconds != null ? formatDuration(row.break_seconds) : '-';
                     const idleDuration = row.idle_seconds != null ? formatDuration(row.idle_seconds) : '-';
                     return `
                         <tr>
@@ -155,13 +157,14 @@
                             <td>${new Date(row.shift_started_at).toLocaleString()}</td>
                             <td>${isActive ? "-" : new Date(row.shift_ended_at).toLocaleString()}</td>
                             <td>${duration}</td>
+                            <td>${breakDuration}</td>
                             <td>${idleDuration}</td>
                             <td><span class="badge ${isActive ? 'badge-active' : 'badge-ended'}">${isActive ? 'Active' : 'Ended'}</span></td>
                         </tr>
                     `;
                 }).join("");
             } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty">Failed to load shifts.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="empty">Failed to load shifts.</td></tr>';
             }
         }
         document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);

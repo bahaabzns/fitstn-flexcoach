@@ -176,6 +176,7 @@
                                 <th>Started At</th>
                                 <th>Ended At</th>
                                 <th>Duration</th>
+                                <th>Break</th>
                                 <th>Idle</th>
                                 <th>Status</th>
                             </tr>
@@ -195,6 +196,7 @@
                             <td>${formatDateTime(shift.shift_started_at)}</td>
                             <td>${shift.shift_ended_at ? formatDateTime(shift.shift_ended_at) : '-'}</td>
                             <td>${formatDuration(shift.duration_seconds)}</td>
+                            <td>${formatDuration(shift.break_seconds)}</td>
                             <td>${formatDuration(shift.idle_seconds)}</td>
                             <td>${statusBadge}</td>
                         </tr>

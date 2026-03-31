@@ -6,6 +6,8 @@ const ALLOWED_EVENT_TYPES = [
     "session_ended",
     "shift_started",
     "shift_ended",
+    "break_started",
+    "break_resumed",
     "idle_started",
     "idle_resumed",
     "tab_focus_lost",

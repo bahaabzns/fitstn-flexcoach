@@ -70,7 +70,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 /* ───────── Helpers ───────── */
 
 function isAgentSignedInAndOnShift() {
-    return currentToken && (currentStatus === "active" || currentStatus === "idle");
+    return currentToken && (currentStatus === "active" || currentStatus === "idle" || currentStatus === "on_break");
 }
 
 function closeSessionViaApi() {
@@ -186,10 +186,11 @@ document.addEventListener("visibilitychange", () => {
 
 /* ───────── Agent Status Badge (top-right corner) ───────── */
 
-const STATUS_LABELS = { active: "Active", idle: "Idle", off_shift: "Off Shift", not_signed_in: "Not Signed In" };
+const STATUS_LABELS = { active: "Active", idle: "Idle", on_break: "On Break", off_shift: "Off Shift", not_signed_in: "Not Signed In" };
 const STATUS_COLORS = {
     active:        { bg: "#dcfce7", border: "#22c55e", text: "#15803d", dot: "#22c55e" },
     idle:          { bg: "#fef9c3", border: "#eab308", text: "#a16207", dot: "#eab308" },
+    on_break:      { bg: "#e0e7ff", border: "#6366f1", text: "#4338ca", dot: "#6366f1" },
     off_shift:     { bg: "#f3f4f6", border: "#9ca3af", text: "#6b7280", dot: "#9ca3af" },
     not_signed_in: { bg: "#fee2e2", border: "#ef4444", text: "#b91c1c", dot: "#ef4444" },
 };
@@ -230,6 +231,7 @@ function createStatusBadge() {
                     <span><span style="color:#64748b;">Shift:</span> <strong id="fc-time-shift" style="color:#e2e8f0;">--</strong></span>
                     <span><span style="color:#64748b;">Active:</span> <strong id="fc-time-active" style="color:#4ade80;">--</strong></span>
                     <span><span style="color:#64748b;">Idle:</span> <strong id="fc-time-idle" style="color:#facc15;">--</strong></span>
+                    <span><span style="color:#64748b;">Break:</span> <strong id="fc-time-break" style="color:#a78bfa;">--</strong></span>
                 </div>
             </div>
         </div>
@@ -243,6 +245,7 @@ function createStatusBadge() {
         </div>
         <div id="fc-actions" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-left:1px solid #334155;">
             <button id="fc-btn-shift" onclick="document.dispatchEvent(new CustomEvent('fc-shift-toggle'))" style="padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#22c55e; color:#fff; white-space:nowrap;">Start Shift</button>
+            <button id="fc-btn-break" onclick="document.dispatchEvent(new CustomEvent('fc-break-toggle'))" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#6366f1; color:#fff; white-space:nowrap;">Take Break</button>
             <button id="fc-btn-overview" onclick="document.dispatchEvent(new CustomEvent('fc-open-overview'))" style="padding:6px 14px; border:1px solid #475569; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:transparent; color:#cbd5e1; white-space:nowrap;">My Overview</button>
             <button id="fc-btn-signout" onclick="document.dispatchEvent(new CustomEvent('fc-sign-out'))" style="padding:6px 14px; border:1px solid #7f1d1d; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:#991b1b; color:#fca5a5; white-space:nowrap;">Sign Out</button>
         </div>
@@ -295,6 +298,34 @@ async function handleShiftToggle() {
     }
 }
 
+async function handleBreakToggle() {
+    if (!currentToken) return;
+    const btn = document.getElementById("fc-btn-break");
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+
+    const isOnBreak = btn.dataset.onBreak === "true";
+    const endpoint = isOnBreak ? "/api/agent/end-break" : "/api/agent/start-break";
+
+    try {
+        const res = await fetch(API_BASE + endpoint, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + currentToken },
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            console.error("Break toggle failed:", err.error || "Unknown error");
+        }
+        updateStatusBadge();
+    } catch (err) {
+        console.error("Break toggle request failed:", err);
+    } finally {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+    }
+}
+
 function handleOpenOverview() {
     if (!currentToken) return;
     window.open(API_BASE + "/overview.html#agentToken=" + currentToken, "_blank");
@@ -322,9 +353,10 @@ async function handleSignOut() {
     updateActionButtons(false, false);
 }
 
-function updateActionButtons(isSignedIn, isOnShift) {
+function updateActionButtons(isSignedIn, isOnShift, isOnBreak) {
     const actionsContainer = document.getElementById("fc-actions");
     const shiftBtn = document.getElementById("fc-btn-shift");
+    const breakBtn = document.getElementById("fc-btn-break");
     if (!actionsContainer) return;
 
     actionsContainer.style.display = isSignedIn ? "flex" : "none";
@@ -341,9 +373,28 @@ function updateActionButtons(isSignedIn, isOnShift) {
             shiftBtn.style.color = "#fff";
         }
     }
+
+    if (breakBtn) {
+        if (isOnShift) {
+            breakBtn.style.display = "inline-block";
+            breakBtn.dataset.onBreak = isOnBreak ? "true" : "false";
+            if (isOnBreak) {
+                breakBtn.textContent = "Resume";
+                breakBtn.style.background = "#22c55e";
+                breakBtn.style.color = "#fff";
+            } else {
+                breakBtn.textContent = "Take Break";
+                breakBtn.style.background = "#6366f1";
+                breakBtn.style.color = "#fff";
+            }
+        } else {
+            breakBtn.style.display = "none";
+        }
+    }
 }
 
 document.addEventListener("fc-shift-toggle", handleShiftToggle);
+document.addEventListener("fc-break-toggle", handleBreakToggle);
 document.addEventListener("fc-open-overview", handleOpenOverview);
 document.addEventListener("fc-sign-out", handleSignOut);
 
@@ -379,6 +430,10 @@ async function updateStatusBadge() {
             const idleSec = Math.round((Date.now() - new Date(data.idle_since).getTime()) / 1000);
             detail.textContent = "Idle for " + formatStatusDuration(idleSec);
             detail.style.display = "inline";
+        } else if (data.status === "on_break") {
+            const breakSec = Math.round((Date.now() - new Date(data.break_started_at).getTime()) / 1000);
+            detail.textContent = "Break for " + formatStatusDuration(breakSec);
+            detail.style.display = "inline";
         } else {
             detail.style.display = "none";
         }
@@ -396,20 +451,24 @@ async function updateStatusBadge() {
 
         // Show shift time stats when on shift
         const isOnShift = !!data.shift_started_at;
+        const isOnBreak = data.status === "on_break";
         if (isOnShift && shiftTimesContainer) {
             const shiftSeconds = Math.round((Date.now() - new Date(data.shift_started_at).getTime()) / 1000);
             const activeSeconds = data.total_active_seconds || 0;
-            const idleSeconds = Math.max(0, shiftSeconds - activeSeconds);
+            const breakSeconds = data.total_break_seconds || 0;
+            const idleSeconds = Math.max(0, shiftSeconds - activeSeconds - breakSeconds);
 
+            const timeBreak = document.getElementById("fc-time-break");
             timeShift.textContent = formatStatusDuration(shiftSeconds);
             timeActive.textContent = formatStatusDuration(activeSeconds);
             timeIdle.textContent = formatStatusDuration(idleSeconds);
+            if (timeBreak) timeBreak.textContent = formatStatusDuration(breakSeconds);
             shiftTimesContainer.style.display = "flex";
         } else if (shiftTimesContainer) {
             shiftTimesContainer.style.display = "none";
         }
 
-        updateActionButtons(true, isOnShift);
+        updateActionButtons(true, isOnShift, isOnBreak);
     } catch {
         // keep last known state
     }

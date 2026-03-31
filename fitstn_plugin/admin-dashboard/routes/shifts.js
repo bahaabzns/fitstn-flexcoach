@@ -40,6 +40,12 @@ module.exports = function (sql, requireAgent) {
                 return res.status(400).json({ error: "No active shift" });
             }
 
+            // Close any active break when ending shift
+            await sql`
+                UPDATE shift_breaks SET ended_at = NOW()
+                WHERE shift_id = ${result[0].id} AND ended_at IS NULL
+            `;
+
             const shiftDurationSeconds = Math.round(
                 (new Date(result[0].shift_ended_at) - new Date(result[0].shift_started_at)) / 1000
             );
@@ -51,6 +57,72 @@ module.exports = function (sql, requireAgent) {
             res.json({ success: true, shift: result[0] });
         } catch (err) {
             res.status(500).json({ error: "Failed to end shift", details: err.message });
+        }
+    });
+
+    router.post("/start-break", requireAgent, async (req, res) => {
+        try {
+            const activeShift = await sql`
+                SELECT id FROM shifts WHERE agent_id = ${req.user.id} AND shift_ended_at IS NULL
+            `;
+            if (activeShift.length === 0) {
+                return res.status(400).json({ error: "No active shift — cannot start break" });
+            }
+
+            const existingBreak = await sql`
+                SELECT id FROM shift_breaks
+                WHERE shift_id = ${activeShift[0].id} AND ended_at IS NULL
+            `;
+            if (existingBreak.length > 0) {
+                return res.status(400).json({ error: "Break already active" });
+            }
+
+            const result = await sql`
+                INSERT INTO shift_breaks (shift_id, agent_id, started_at)
+                VALUES (${activeShift[0].id}, ${req.user.id}, NOW())
+                RETURNING *
+            `;
+
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
+                VALUES (${req.user.id}, 'break_started', ${activeShift[0].id}, ${JSON.stringify({})}::jsonb)
+            `;
+
+            res.status(201).json({ success: true, shiftBreak: result[0] });
+        } catch (err) {
+            res.status(500).json({ error: "Failed to start break", details: err.message });
+        }
+    });
+
+    router.post("/end-break", requireAgent, async (req, res) => {
+        try {
+            const activeShift = await sql`
+                SELECT id FROM shifts WHERE agent_id = ${req.user.id} AND shift_ended_at IS NULL
+            `;
+            if (activeShift.length === 0) {
+                return res.status(400).json({ error: "No active shift" });
+            }
+
+            const result = await sql`
+                UPDATE shift_breaks SET ended_at = NOW()
+                WHERE shift_id = ${activeShift[0].id} AND ended_at IS NULL
+                RETURNING *
+            `;
+            if (result.length === 0) {
+                return res.status(400).json({ error: "No active break" });
+            }
+
+            const breakDurationSeconds = Math.round(
+                (new Date(result[0].ended_at) - new Date(result[0].started_at)) / 1000
+            );
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
+                VALUES (${req.user.id}, 'break_resumed', ${activeShift[0].id}, ${JSON.stringify({ break_duration_seconds: breakDurationSeconds })}::jsonb)
+            `;
+
+            res.json({ success: true, shiftBreak: result[0] });
+        } catch (err) {
+            res.status(500).json({ error: "Failed to end break", details: err.message });
         }
     });
 
@@ -82,12 +154,42 @@ module.exports = function (sql, requireAgent) {
             if (shift.length === 0) {
                 return res.json({ status: "off_shift" });
             }
+
+            const shiftId = shift[0].id;
+            const shiftStartedAt = shift[0].shift_started_at;
+
+            // Check for active break
+            const activeBreak = await sql`
+                SELECT id, started_at FROM shift_breaks
+                WHERE shift_id = ${shiftId} AND ended_at IS NULL
+                LIMIT 1
+            `;
+
+            // Total break seconds for this shift (completed breaks only)
+            const breakData = await sql`
+                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))), 0) AS total_seconds
+                FROM shift_breaks
+                WHERE shift_id = ${shiftId} AND ended_at IS NOT NULL
+            `;
+            const totalBreakSeconds = Math.round(Number(breakData[0].total_seconds));
+
+            // If on break, return early with on_break status
+            if (activeBreak.length > 0) {
+                const currentBreakSeconds = Math.round((Date.now() - new Date(activeBreak[0].started_at).getTime()) / 1000);
+                return res.json({
+                    status: "on_break",
+                    break_started_at: activeBreak[0].started_at,
+                    shift_started_at: shiftStartedAt,
+                    total_break_seconds: totalBreakSeconds + currentBreakSeconds,
+                    total_active_seconds: 0,
+                });
+            }
+
             const session = await sql`
                 SELECT id, chat_name, clicked_at FROM sessions
                 WHERE agent_id = ${agentId} AND ended_at IS NULL
                 ORDER BY clicked_at DESC LIMIT 1
             `;
-            const shiftStartedAt = shift[0].shift_started_at;
             const completedSessions = await sql`
                 SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - clicked_at))), 0) AS total_seconds
                 FROM sessions
@@ -106,9 +208,11 @@ module.exports = function (sql, requireAgent) {
                     chat_started_at: session[0].clicked_at,
                     shift_started_at: shiftStartedAt,
                     total_active_seconds: totalActiveSeconds,
+                    total_break_seconds: totalBreakSeconds,
                 });
             }
-            // Idle: on shift but no active session
+
+            // Idle: on shift but no active session and not on break
             const lastSession = await sql`
                 SELECT ended_at FROM sessions
                 WHERE agent_id = ${agentId} AND ended_at IS NOT NULL
@@ -122,6 +226,7 @@ module.exports = function (sql, requireAgent) {
                 idle_since: idleSince.toISOString(),
                 shift_started_at: shiftStartedAt,
                 total_active_seconds: completedActiveSeconds,
+                total_break_seconds: totalBreakSeconds,
             });
         } catch (err) {
             res.status(500).json({ error: "Failed to fetch status", details: err.message });

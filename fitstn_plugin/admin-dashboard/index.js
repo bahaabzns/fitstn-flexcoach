@@ -86,7 +86,18 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 WHERE s.agent_id = a.id AND sh2.agent_id = a.id AND sh2.shift_ended_at IS NULL
                 AND s.clicked_at < COALESCE(sh2.shift_ended_at, NOW())
                 AND COALESCE(s.ended_at, NOW()) > sh2.shift_started_at
-                ) AS shift_active_seconds
+                ) AS shift_active_seconds,
+                (SELECT sb.id FROM shift_breaks sb
+                    JOIN shifts sh3 ON sb.shift_id = sh3.id
+                    WHERE sh3.agent_id = a.id AND sh3.shift_ended_at IS NULL AND sb.ended_at IS NULL
+                    LIMIT 1) AS active_break_id,
+                (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
+                    COALESCE(sb.ended_at, NOW()) - sb.started_at
+                ))), 0)::int
+                FROM shift_breaks sb
+                JOIN shifts sh4 ON sb.shift_id = sh4.id
+                WHERE sh4.agent_id = a.id AND sh4.shift_ended_at IS NULL
+                ) AS shift_break_seconds
             FROM agents a
             WHERE a.is_active = true
             ORDER BY
@@ -96,10 +107,13 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
         const rows = result.map(row => {
             const onShift = !!row.shift_id;
             const hasActiveChat = !!row.current_session_id;
+            const hasActiveBreak = !!row.active_break_id;
             let status, idle_since = null;
 
             if (!onShift) {
                 status = "off_shift";
+            } else if (hasActiveBreak) {
+                status = "on_break";
             } else if (hasActiveChat) {
                 status = "active";
             } else {
@@ -112,7 +126,8 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
             let shift_idle_seconds = null;
             if (onShift) {
                 const shiftSec = Math.round((Date.now() - new Date(row.shift_started_at).getTime()) / 1000);
-                shift_idle_seconds = Math.max(0, shiftSec - (row.shift_active_seconds || 0));
+                const breakSec = row.shift_break_seconds || 0;
+                shift_idle_seconds = Math.max(0, shiftSec - (row.shift_active_seconds || 0) - breakSec);
             }
 
             return {
@@ -126,6 +141,7 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 idle_since,
                 today_sessions: row.today_sessions,
                 shift_idle_seconds,
+                shift_break_seconds: row.shift_break_seconds || 0,
             };
         });
         res.json(rows);
@@ -150,7 +166,13 @@ app.get("/api/shifts", requireAdmin, async (req, res) => {
                 WHERE s.agent_id = sh.agent_id
                 AND s.clicked_at < COALESCE(sh.shift_ended_at, NOW())
                 AND COALESCE(s.ended_at, NOW()) > sh.shift_started_at
-                ) AS active_seconds
+                ) AS active_seconds,
+                (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
+                    COALESCE(sb.ended_at, COALESCE(sh.shift_ended_at, NOW())) - sb.started_at
+                ))), 0)::int
+                FROM shift_breaks sb
+                WHERE sb.shift_id = sh.id
+                ) AS break_seconds
             FROM shifts sh
             LEFT JOIN agents a ON sh.agent_id = a.id
             WHERE sh.shift_started_at >= ${startDate}::date
@@ -160,11 +182,13 @@ app.get("/api/shifts", requireAdmin, async (req, res) => {
         const rows = result.map(row => {
             const shiftEnd = row.shift_ended_at ? new Date(row.shift_ended_at) : new Date();
             const shiftDuration = Math.round((shiftEnd - new Date(row.shift_started_at)) / 1000);
+            const breakSeconds = row.break_seconds || 0;
             return {
                 ...row,
                 duration_seconds: row.shift_ended_at ? shiftDuration : null,
                 active_seconds: row.active_seconds || 0,
-                idle_seconds: Math.max(0, shiftDuration - (row.active_seconds || 0)),
+                break_seconds: breakSeconds,
+                idle_seconds: Math.max(0, shiftDuration - (row.active_seconds || 0) - breakSeconds),
             };
         });
         res.json({ period: { type: period, start: startDate, end: endDate }, shifts: rows });
@@ -475,6 +499,17 @@ app.listen(PORT, async () => {
                 agent_id INTEGER NOT NULL REFERENCES agents(id),
                 shift_started_at TIMESTAMP NOT NULL DEFAULT NOW(),
                 shift_ended_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `;
+
+        await sql`
+            CREATE TABLE IF NOT EXISTS shift_breaks (
+                id SERIAL PRIMARY KEY,
+                shift_id INTEGER NOT NULL REFERENCES shifts(id),
+                agent_id INTEGER NOT NULL REFERENCES agents(id),
+                started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                ended_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         `;
