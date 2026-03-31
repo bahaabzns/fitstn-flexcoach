@@ -383,7 +383,7 @@ app.get("/api/agent-demand", requireAdmin, async (req, res) => {
             agents.map(async (agent) => {
                 try {
                     const { data, error } = await supabase.rpc("get_chat_rooms_paginated", {
-                        p_assigned_staff_id: null,
+                        p_assigned_staff_id: agent.fitstn_id,
                         p_client_gender: null,
                         p_coach_id: null,
                         p_ghost_days: null,
@@ -391,13 +391,13 @@ app.get("/api/agent-demand", requireAdmin, async (req, res) => {
                         p_last_interaction: null,
                         p_last_interaction_from: null,
                         p_last_interaction_to: null,
-                        p_last_message_from: "Client",
+                        p_last_message_from: "client",
                         p_limit: 1,
                         p_no_assigned_staff: false,
                         p_offset: 0,
                         p_package_id: null,
                         p_search: null,
-                        p_staff_id: agent.fitstn_id,
+                        p_staff_id: null,
                         p_subscription_start_date: null,
                         p_subscription_start_weekday: null,
                         p_subscription_status: null,
@@ -411,7 +411,7 @@ app.get("/api/agent-demand", requireAdmin, async (req, res) => {
                         return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: error.message };
                     }
 
-                    const totalCount = data?.total_count || 0;
+                    const totalCount = data?.total || 0;
                     return { agent_id: agent.id, agent_name: agent.name, demand_count: totalCount };
                 } catch (err) {
                     console.error(`Demand fetch error for ${agent.name}:`, err.message);
