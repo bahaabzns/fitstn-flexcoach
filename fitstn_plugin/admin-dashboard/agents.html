@@ -88,6 +88,10 @@
                 <label for="agent-name">Name</label>
                 <input type="text" id="agent-name" placeholder="Agent name">
             </div>
+            <div class="field">
+                <label for="agent-fitstn-id">Fitstn ID</label>
+                <input type="text" id="agent-fitstn-id" placeholder="Supabase staff UUID">
+            </div>
             <div>
                 <button class="btn btn-primary" id="form-submit-btn" onclick="submitForm()">Create</button>
                 <button class="btn btn-secondary" id="form-cancel-btn" onclick="cancelEdit()" style="display:none;">Cancel</button>
@@ -101,13 +105,14 @@
                 <th>ID</th>
                 <th>Email</th>
                 <th>Name</th>
+                <th>Fitstn ID</th>
                 <th>Status</th>
                 <th>Created</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody id="agents-body">
-            <tr><td colspan="6" class="empty">Loading...</td></tr>
+            <tr><td colspan="7" class="empty">Loading...</td></tr>
         </tbody>
     </table>
 
@@ -145,7 +150,7 @@
                 const res = await authFetch('/api/agents');
                 const data = await res.json();
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="empty">No agents yet. Create one above.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty">No agents yet. Create one above.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = data.map(a => `
@@ -153,10 +158,11 @@
                         <td>${a.id}</td>
                         <td>${a.email}</td>
                         <td>${a.name || '-'}</td>
+                        <td style="font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${a.fitstn_id || ''}">${a.fitstn_id || '-'}</td>
                         <td><span class="${a.is_active ? 'status-active' : 'status-inactive'}">${a.is_active ? 'Active' : 'Inactive'}</span></td>
                         <td>${new Date(a.created_at).toLocaleString()}</td>
                         <td class="actions">
-                            <button class="btn btn-primary btn-sm" onclick="startEdit(${a.id}, '${a.email.replace(/'/g, "\\'")}', '${(a.name || '').replace(/'/g, "\\'")}')">Edit</button>
+                            <button class="btn btn-primary btn-sm" onclick="startEdit(${a.id}, '${a.email.replace(/'/g, "\\'")}', '${(a.name || '').replace(/'/g, "\\'")}', '${(a.fitstn_id || '').replace(/'/g, "\\'")}')">Edit</button>
                             ${a.is_active
                                 ? `<button class="btn btn-danger btn-sm" onclick="deleteAgent(${a.id})">Deactivate</button>`
                                 : `<button class="btn btn-secondary btn-sm" onclick="reactivateAgent(${a.id})">Reactivate</button>`
@@ -165,7 +171,7 @@
                     </tr>
                 `).join('');
             } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="6" class="empty">Failed to load agents.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="empty">Failed to load agents.</td></tr>';
             }
         }
 
@@ -173,12 +179,13 @@
             const email = document.getElementById('agent-email').value.trim();
             const password = document.getElementById('agent-password').value;
             const name = document.getElementById('agent-name').value.trim();
+            const fitstn_id = document.getElementById('agent-fitstn-id').value.trim();
 
             if (!email) { showMsg('Email is required', 'error'); return; }
 
             if (editingId) {
                 // Update
-                const body = { email, name };
+                const body = { email, name, fitstn_id };
                 if (password) body.password = password;
                 try {
                     const res = await authFetch('/api/agents/' + editingId, {
@@ -201,7 +208,7 @@
                     const res = await authFetch('/api/agents', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email, password, name })
+                        body: JSON.stringify({ email, password, name, fitstn_id })
                     });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.error);
@@ -209,6 +216,7 @@
                     document.getElementById('agent-email').value = '';
                     document.getElementById('agent-password').value = '';
                     document.getElementById('agent-name').value = '';
+                    document.getElementById('agent-fitstn-id').value = '';
                     loadAgents();
                 } catch (err) {
                     showMsg(err.message || 'Failed to create agent', 'error');
@@ -216,11 +224,12 @@
             }
         }
 
-        function startEdit(id, email, name) {
+        function startEdit(id, email, name, fitst_id) {
             editingId = id;
             document.getElementById('agent-email').value = email;
             document.getElementById('agent-password').value = '';
             document.getElementById('agent-name').value = name;
+            document.getElementById('agent-fitstn-id').value = fitst_id || '';
             document.getElementById('form-title').textContent = 'Edit Agent #' + id;
             document.getElementById('form-submit-btn').textContent = 'Update';
             document.getElementById('form-cancel-btn').style.display = 'inline-block';
@@ -232,6 +241,7 @@
             document.getElementById('agent-email').value = '';
             document.getElementById('agent-password').value = '';
             document.getElementById('agent-name').value = '';
+            document.getElementById('agent-fitstn-id').value = '';
             document.getElementById('form-title').textContent = 'Create Agent';
             document.getElementById('form-submit-btn').textContent = 'Create';
             document.getElementById('form-cancel-btn').style.display = 'none';

@@ -365,6 +365,69 @@ app.get("/api/session-messages/:sessionId", requireAdmin, async (req, res) => {
     }
 });
 
+app.get("/api/agent-demand", requireAdmin, async (req, res) => {
+    try {
+        const agents = await sql`
+            SELECT id, name, email, fitstn_id
+            FROM agents
+            WHERE is_active = true AND fitstn_id IS NOT NULL AND fitstn_id != ''
+        `;
+
+        if (agents.length === 0) {
+            return res.json([]);
+        }
+
+        await ensureSupabaseAuth();
+
+        const demandResults = await Promise.all(
+            agents.map(async (agent) => {
+                try {
+                    const { data, error } = await supabase.rpc("get_chat_rooms_paginated", {
+                        p_assigned_staff_id: null,
+                        p_client_gender: null,
+                        p_coach_id: null,
+                        p_ghost_days: null,
+                        p_ghost_only: false,
+                        p_last_interaction: null,
+                        p_last_interaction_from: null,
+                        p_last_interaction_to: null,
+                        p_last_message_from: "Client",
+                        p_limit: 1,
+                        p_no_assigned_staff: false,
+                        p_offset: 0,
+                        p_package_id: null,
+                        p_search: null,
+                        p_staff_id: agent.fitstn_id,
+                        p_subscription_start_date: null,
+                        p_subscription_start_weekday: null,
+                        p_subscription_status: null,
+                        p_subscription_t_status: null,
+                        p_tenant_id: "fitstn",
+                        p_unread_only: false,
+                    });
+
+                    if (error) {
+                        console.error(`Demand fetch failed for ${agent.name}:`, error.message);
+                        return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: error.message };
+                    }
+
+                    const totalCount = data?.total_count || 0;
+                    return { agent_id: agent.id, agent_name: agent.name, demand_count: totalCount };
+                } catch (err) {
+                    console.error(`Demand fetch error for ${agent.name}:`, err.message);
+                    return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: err.message };
+                }
+            })
+        );
+
+        res.json(demandResults);
+    } catch (err) {
+        console.error("GET /api/agent-demand error:", err.message);
+        supabaseAuthenticated = false;
+        res.status(500).json({ error: "Failed to fetch agent demand", details: err.message });
+    }
+});
+
 app.post("/api/chat-click", requireAgent, async (req, res) => {
     try {
         const { chatName, chatPreview } = req.body;
@@ -747,6 +810,9 @@ app.listen(PORT, async () => {
 
         // Add messages column to sessions if it doesn't exist
         await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`;
+
+        // Add fitstn_id column to agents (links to Supabase staff UUID)
+        await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS fitstn_id VARCHAR(100)`;
 
         // Seed default admin
         const existingAdmin = await sql`SELECT id FROM admins WHERE email = 'admin@fitstn.com'`;

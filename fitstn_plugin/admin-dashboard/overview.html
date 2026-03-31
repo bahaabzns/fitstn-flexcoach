@@ -143,6 +143,24 @@
             20% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
             100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
         }
+        /* Demand section */
+        .demand-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+        .demand-card {
+            background: #fff; border-radius: 8px; padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            min-width: 180px; flex: 1 1 200px; max-width: 280px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-left: 4px solid #007bff;
+        }
+        .demand-card .demand-agent { font-weight: 600; color: #333; font-size: 14px; }
+        .demand-card .demand-count { font-size: 22px; font-weight: bold; color: #007bff; }
+        .demand-card.high-demand { border-left-color: #dc3545; }
+        .demand-card.high-demand .demand-count { color: #dc3545; }
+        .demand-card.medium-demand { border-left-color: #fd7e14; }
+        .demand-card.medium-demand .demand-count { color: #fd7e14; }
+        .demand-card.no-demand { border-left-color: #28a745; }
+        .demand-card.no-demand .demand-count { color: #28a745; }
+        .demand-total { font-size: 14px; color: #555; margin-bottom: 12px; }
     </style>
 </head>
 <body>
@@ -167,6 +185,15 @@
         <div id="idle-alert" class="idle-alert-banner"></div>
         <div id="cards-container" class="cards-grid">
             <div class="empty">Loading...</div>
+        </div>
+
+        <!-- Agent Demand Section -->
+        <div id="demand-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 8px;">Agent Demand <span id="demand-refresh-time" style="font-size:12px; color:#999; font-weight:normal;"></span></h2>
+            <div id="demand-total" class="demand-total"></div>
+            <div id="demand-container" class="demand-grid">
+                <div class="empty">Loading demand...</div>
+            </div>
         </div>
 
         <!-- Live Activity Feed -->
@@ -860,6 +887,50 @@
         }
 
         // =====================
+        // AGENT DEMAND
+        // =====================
+        async function loadAgentDemand() {
+            if (!isAdmin) return;
+            const container = document.getElementById("demand-container");
+            const totalLabel = document.getElementById("demand-total");
+            const refreshTime = document.getElementById("demand-refresh-time");
+            try {
+                const res = await authFetch("/api/agent-demand");
+                const demandData = await res.json();
+
+                if (!Array.isArray(demandData) || demandData.length === 0) {
+                    container.innerHTML = '<div class="empty">No agents with Fitstn ID configured. Set it in the Agents page.</div>';
+                    totalLabel.textContent = '';
+                    refreshTime.textContent = '';
+                    return;
+                }
+
+                const totalDemand = demandData.reduce((sum, d) => sum + d.demand_count, 0);
+                totalLabel.textContent = `Total waiting rooms: ${totalDemand}`;
+
+                const sorted = [...demandData].sort((a, b) => b.demand_count - a.demand_count);
+
+                container.innerHTML = sorted.map(d => {
+                    let demandClass = 'no-demand';
+                    if (d.demand_count >= 20) demandClass = 'high-demand';
+                    else if (d.demand_count >= 10) demandClass = 'medium-demand';
+
+                    return `
+                        <div class="demand-card ${demandClass}">
+                            <span class="demand-agent">${d.agent_name}</span>
+                            <span class="demand-count">${d.demand_count}</span>
+                        </div>
+                    `;
+                }).join('');
+
+                refreshTime.textContent = '(updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ')';
+            } catch (err) {
+                console.error("Failed to load demand:", err);
+                container.innerHTML = '<div class="empty">Failed to load demand data.</div>';
+            }
+        }
+
+        // =====================
         // INIT
         // =====================
         setDefaultDate();
@@ -871,6 +942,8 @@
             loadAgentList();
             loadActivityFeed();
             setInterval(loadActivityFeed, 5000);
+            loadAgentDemand();
+            setInterval(loadAgentDemand, 30000);
         }
 
         if (isAgent) {

@@ -7,7 +7,7 @@ module.exports = function (sql, requireAdmin) {
     router.get("/", requireAdmin, async (req, res) => {
         try {
             const agents = await sql`
-                SELECT id, email, name, is_active, created_at, updated_at
+                SELECT id, email, name, fitstn_id, is_active, created_at, updated_at
                 FROM agents ORDER BY created_at DESC
             `;
             res.json(agents);
@@ -18,15 +18,15 @@ module.exports = function (sql, requireAdmin) {
 
     router.post("/", requireAdmin, async (req, res) => {
         try {
-            const { email, password, name } = req.body;
+            const { email, password, name, fitstn_id } = req.body;
             if (!email || !password) {
                 return res.status(400).json({ error: "Email and password required" });
             }
             const hash = await bcrypt.hash(password, 10);
             const result = await sql`
-                INSERT INTO agents (email, password_hash, name)
-                VALUES (${email}, ${hash}, ${name || null})
-                RETURNING id, email, name, is_active, created_at
+                INSERT INTO agents (email, password_hash, name, fitstn_id)
+                VALUES (${email}, ${hash}, ${name || null}, ${fitstn_id || null})
+                RETURNING id, email, name, fitstn_id, is_active, created_at
             `;
             res.json(result[0]);
         } catch (err) {
@@ -39,7 +39,7 @@ module.exports = function (sql, requireAdmin) {
 
     router.put("/:id", requireAdmin, async (req, res) => {
         try {
-            const { email, name, password, is_active } = req.body;
+            const { email, name, password, is_active, fitstn_id } = req.body;
             const id = req.params.id;
 
             const existing = await sql`SELECT id FROM agents WHERE id = ${id}`;
@@ -63,9 +63,12 @@ module.exports = function (sql, requireAdmin) {
                     await sql`DELETE FROM auth_tokens WHERE user_type = 'agent' AND user_id = ${id}`;
                 }
             }
+            if (fitstn_id !== undefined) {
+                await sql`UPDATE agents SET fitstn_id = ${fitstn_id || null}, updated_at = NOW() WHERE id = ${id}`;
+            }
 
             const result = await sql`
-                SELECT id, email, name, is_active, created_at, updated_at
+                SELECT id, email, name, fitstn_id, is_active, created_at, updated_at
                 FROM agents WHERE id = ${id}
             `;
             res.json(result[0]);
