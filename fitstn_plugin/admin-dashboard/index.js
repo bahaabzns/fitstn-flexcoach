@@ -435,6 +435,31 @@ app.put("/api/settings", requireAdmin, async (req, res) => {
     }
 });
 
+app.post("/api/reset-database", requireAdmin, async (req, res) => {
+    try {
+        const { confirmation } = req.body;
+        if (confirmation !== "RESET ALL DATA") {
+            return res.status(400).json({ error: "Type 'RESET ALL DATA' to confirm." });
+        }
+
+        // Delete in order to respect foreign key constraints
+        await sql`DELETE FROM activity_events`;
+        await sql`DELETE FROM shift_breaks`;
+        await sql`DELETE FROM sessions`;
+        await sql`DELETE FROM shifts`;
+        await sql`DELETE FROM salary_deductions`;
+        await sql`DELETE FROM salary_overtime`;
+        await sql`DELETE FROM salary_records`;
+        await sql`DELETE FROM auth_tokens`;
+
+        console.log("Database reset by admin at", new Date().toISOString());
+        res.json({ success: true, message: "All operational data has been cleared." });
+    } catch (err) {
+        console.error("POST /api/reset-database error:", err.message);
+        res.status(500).json({ error: "Failed to reset database", details: err.message });
+    }
+});
+
 app.post("/api/close-session", requireAgent, async (req, res) => {
     try {
         const updated = await sql`

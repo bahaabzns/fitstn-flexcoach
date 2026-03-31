@@ -101,6 +101,25 @@
             <span class="msg error" id="error-msg"></span>
         </div>
     </div>
+
+    <div class="form-section" style="margin-top: 24px; border: 2px solid #dc3545;">
+        <h2 style="color: #dc3545;">Danger Zone</h2>
+        <p style="font-size: 13px; color: #555; margin: 0 0 12px;">
+            This will permanently delete all sessions, shifts, breaks, activity events, salary records, and log everyone out.
+            Agent accounts, admin accounts, and settings are preserved.
+        </p>
+        <div class="field" id="reset-confirm-field" style="display: none;">
+            <label for="reset-confirm-input">Type <strong>RESET ALL DATA</strong> to confirm</label>
+            <input type="text" id="reset-confirm-input" placeholder="RESET ALL DATA"
+                   style="width: 200px; padding: 8px; border: 1px solid #dc3545; border-radius: 4px; font-size: 14px;">
+        </div>
+        <div class="actions">
+            <button class="btn" id="reset-db-btn"
+                    style="background: #dc3545;">Reset Database</button>
+            <span class="msg success" id="reset-success-msg"></span>
+            <span class="msg error" id="reset-error-msg"></span>
+        </div>
+    </div>
     <script>
         const token = localStorage.getItem('adminToken');
         if (!token) { window.location.href = '/'; }
@@ -175,6 +194,59 @@
         });
 
         loadSettings();
+
+        const resetBtn = document.getElementById('reset-db-btn');
+        const resetConfirmField = document.getElementById('reset-confirm-field');
+        const resetConfirmInput = document.getElementById('reset-confirm-input');
+        const resetSuccessMsg = document.getElementById('reset-success-msg');
+        const resetErrorMsg = document.getElementById('reset-error-msg');
+        let isResetConfirmVisible = false;
+
+        resetBtn.addEventListener('click', async () => {
+            resetSuccessMsg.style.display = 'none';
+            resetErrorMsg.style.display = 'none';
+
+            if (!isResetConfirmVisible) {
+                resetConfirmField.style.display = 'block';
+                resetConfirmInput.focus();
+                isResetConfirmVisible = true;
+                resetBtn.textContent = 'Confirm Reset';
+                return;
+            }
+
+            if (resetConfirmInput.value !== 'RESET ALL DATA') {
+                resetErrorMsg.textContent = "Type 'RESET ALL DATA' exactly to confirm.";
+                resetErrorMsg.style.display = 'inline';
+                return;
+            }
+
+            resetBtn.disabled = true;
+            resetBtn.textContent = 'Resetting...';
+            try {
+                const res = await authFetch('/api/reset-database', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirmation: resetConfirmInput.value }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    resetSuccessMsg.textContent = 'Database reset successfully.';
+                    resetSuccessMsg.style.display = 'inline';
+                    resetConfirmInput.value = '';
+                    resetConfirmField.style.display = 'none';
+                    isResetConfirmVisible = false;
+                    resetBtn.textContent = 'Reset Database';
+                } else {
+                    resetErrorMsg.textContent = data.error || 'Reset failed.';
+                    resetErrorMsg.style.display = 'inline';
+                }
+            } catch (err) {
+                resetErrorMsg.textContent = 'Reset failed — check your connection and try again.';
+                resetErrorMsg.style.display = 'inline';
+            }
+            resetBtn.disabled = false;
+            if (isResetConfirmVisible) resetBtn.textContent = 'Confirm Reset';
+        });
     </script>
 </body>
 </html>
