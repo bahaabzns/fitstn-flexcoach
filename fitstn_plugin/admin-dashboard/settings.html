@@ -95,6 +95,12 @@
             <input type="number" id="session-timeout-min" min="1" max="120" value="10">
             <div class="hint">Automatically close inactive sessions after this period of no messages or activity.</div>
         </div>
+        <h2 style="margin-top: 24px;">Shift Auto-Timeout</h2>
+        <div class="field">
+            <label for="max-shift-hours">Auto-close shifts after (hours)</label>
+            <input type="number" id="max-shift-hours" min="1" max="24" value="14">
+            <div class="hint">Automatically end shifts that exceed this duration (closes open sessions and breaks too).</div>
+        </div>
         <div class="actions">
             <button class="btn btn-primary" id="save-btn">Save</button>
             <span class="msg success" id="success-msg">Settings saved.</span>
@@ -143,6 +149,7 @@
         const maxSessionInput = document.getElementById('max-session-min');
         const idleInSessionInput = document.getElementById('idle-in-session-min');
         const sessionTimeoutInput = document.getElementById('session-timeout-min');
+        const maxShiftHoursInput = document.getElementById('max-shift-hours');
         const saveBtn = document.getElementById('save-btn');
         const successMsg = document.getElementById('success-msg');
         const errorMsg = document.getElementById('error-msg');
@@ -156,6 +163,7 @@
                 if (data.max_session_minutes) maxSessionInput.value = data.max_session_minutes;
                 if (data.idle_inside_session_minutes) idleInSessionInput.value = data.idle_inside_session_minutes;
                 if (data.session_timeout_minutes) sessionTimeoutInput.value = data.session_timeout_minutes;
+                if (data.max_shift_hours) maxShiftHoursInput.value = data.max_shift_hours;
             } catch (err) {
                 errorMsg.textContent = 'Failed to load settings.';
                 errorMsg.style.display = 'inline';
@@ -176,6 +184,7 @@
                         max_session_minutes: parseInt(maxSessionInput.value),
                         idle_inside_session_minutes: parseInt(idleInSessionInput.value),
                         session_timeout_minutes: parseInt(sessionTimeoutInput.value),
+                        max_shift_hours: parseInt(maxShiftHoursInput.value),
                     }),
                 });
                 const data = await res.json();

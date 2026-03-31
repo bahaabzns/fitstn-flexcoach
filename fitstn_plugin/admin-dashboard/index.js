@@ -457,12 +457,13 @@ app.get("/api/settings", requireAdmin, async (req, res) => {
 
 app.put("/api/settings", requireAdmin, async (req, res) => {
     try {
-        const { idle_warning_minutes, idle_critical_minutes, max_session_minutes, idle_inside_session_minutes, session_timeout_minutes } = req.body;
+        const { idle_warning_minutes, idle_critical_minutes, max_session_minutes, idle_inside_session_minutes, session_timeout_minutes, max_shift_hours } = req.body;
         const warning = parseInt(idle_warning_minutes);
         const critical = parseInt(idle_critical_minutes);
         const maxSession = parseInt(max_session_minutes);
         const idleInSession = parseInt(idle_inside_session_minutes);
         const sessionTimeout = parseInt(session_timeout_minutes);
+        const maxShiftHours = parseInt(max_shift_hours);
         if (!warning || !critical || warning < 1 || critical < 1 || warning >= critical) {
             return res.status(400).json({ error: "Invalid values. Warning must be less than critical, both must be >= 1." });
         }
@@ -475,6 +476,9 @@ app.put("/api/settings", requireAdmin, async (req, res) => {
         if (!sessionTimeout || sessionTimeout < 1) {
             return res.status(400).json({ error: "Session timeout must be >= 1 minute." });
         }
+        if (!maxShiftHours || maxShiftHours < 1) {
+            return res.status(400).json({ error: "Max shift hours must be >= 1." });
+        }
 
         const settingsToSave = {
             idle_warning_minutes: String(warning),
@@ -482,6 +486,7 @@ app.put("/api/settings", requireAdmin, async (req, res) => {
             max_session_minutes: String(maxSession),
             idle_inside_session_minutes: String(idleInSession),
             session_timeout_minutes: String(sessionTimeout),
+            max_shift_hours: String(maxShiftHours),
         };
         for (const [key, value] of Object.entries(settingsToSave)) {
             await sql`
@@ -631,7 +636,8 @@ app.listen(PORT, async () => {
                 ('idle_critical_minutes', '10'),
                 ('max_session_minutes', '30'),
                 ('idle_inside_session_minutes', '2'),
-                ('session_timeout_minutes', '10')
+                ('session_timeout_minutes', '10'),
+                ('max_shift_hours', '14')
             ON CONFLICT (key) DO NOTHING
         `;
 
@@ -770,6 +776,10 @@ app.listen(PORT, async () => {
         const SESSION_TIMEOUT_CHECK_MS = 60 * 1000;
         setInterval(checkSessionTimeouts, SESSION_TIMEOUT_CHECK_MS);
 
+        // Start periodic shift auto-timeout check (every 5 minutes)
+        const SHIFT_TIMEOUT_CHECK_MS = 5 * 60 * 1000;
+        setInterval(checkShiftTimeouts, SHIFT_TIMEOUT_CHECK_MS);
+
         console.log("Database schema ready.");
     } catch (err) {
         console.error("Failed to connect to database:", err.message);
@@ -812,6 +822,54 @@ async function checkSessionTimeouts() {
         }
     } catch (err) {
         console.error("Session timeout check failed:", err.message);
+    }
+}
+
+async function checkShiftTimeouts() {
+    try {
+        const maxHoursSetting = await sql`
+            SELECT value FROM settings WHERE key = 'max_shift_hours'
+        `;
+        const maxHours = parseInt(maxHoursSetting[0]?.value) || 14;
+        const timeoutInterval = maxHours + " hours";
+
+        const staleShifts = await sql`
+            SELECT id, agent_id FROM shifts
+            WHERE shift_ended_at IS NULL
+            AND shift_started_at < NOW() - ${timeoutInterval}::interval
+        `;
+
+        for (const shift of staleShifts) {
+            // Close any open breaks
+            await sql`
+                UPDATE shift_breaks SET ended_at = NOW()
+                WHERE shift_id = ${shift.id} AND ended_at IS NULL
+            `;
+            // Close any open sessions
+            const openSessions = await sql`
+                SELECT id FROM sessions
+                WHERE agent_id = ${shift.agent_id} AND ended_at IS NULL
+            `;
+            for (const session of openSessions) {
+                await sql`UPDATE sessions SET ended_at = NOW() WHERE id = ${session.id}`;
+                await sql`
+                    INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
+                    VALUES (${shift.agent_id}, 'session_ended', ${session.id}, '{"reason": "shift_auto_timeout"}'::jsonb)
+                `;
+            }
+            // End the shift
+            await sql`UPDATE shifts SET shift_ended_at = NOW() WHERE id = ${shift.id}`;
+            await sql`
+                INSERT INTO activity_events (agent_id, event_type, metadata)
+                VALUES (${shift.agent_id}, 'shift_ended', '{"reason": "auto_timeout"}'::jsonb)
+            `;
+        }
+
+        if (staleShifts.length > 0) {
+            console.log(`Auto-closed ${staleShifts.length} timed-out shift(s)`);
+        }
+    } catch (err) {
+        console.error("Shift timeout check failed:", err.message);
     }
 }
 
