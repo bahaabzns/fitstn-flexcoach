@@ -206,36 +206,58 @@ function formatStatusDuration(seconds) {
 }
 
 function createStatusBadge() {
-    if (document.getElementById("fc-status-badge")) return;
+    if (document.getElementById("fc-top-bar")) return;
 
-    const badge = document.createElement("div");
-    badge.id = "fc-status-badge";
-    badge.style.cssText = `
-        position: fixed; top: 100px; right: 12px; z-index: 99999;
-        background: #fee2e2; border: 1.5px solid #ef4444; border-radius: 8px;
-        padding: 8px 14px; font-family: Arial, sans-serif;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        display: flex; align-items: center; gap: 8px;
+    const bar = document.createElement("div");
+    bar.id = "fc-top-bar";
+    bar.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100%; z-index: 99999;
+        background: #1e293b; font-family: Arial, sans-serif;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        display: flex; align-items: stretch; justify-content: space-between;
+        padding: 0; min-height: 48px;
         transition: all 0.3s ease;
     `;
-    badge.innerHTML = `
-        <div id="fc-status-dot" style="width:8px; height:8px; border-radius:50%; background:#ef4444; flex-shrink:0;"></div>
-        <div>
-            <div id="fc-status-label" style="font-size:13px; font-weight:600; color:#b91c1c; line-height:1.2;">Not Signed In</div>
-            <div id="fc-status-detail" style="font-size:11px; color:#888; line-height:1.2; margin-top:2px; display:none;"></div>
-            <div id="fc-shift-times" style="display:none; margin-top:4px; font-size:10px; color:#555; line-height:1.4; border-top:1px solid rgba(0,0,0,0.08); padding-top:4px;">
-                <div><span style="color:#888;">Shift:</span> <strong id="fc-time-shift">--</strong></div>
-                <div><span style="color:#888;">Active:</span> <strong id="fc-time-active" style="color:#15803d;">--</strong></div>
-                <div><span style="color:#888;">Idle:</span> <strong id="fc-time-idle" style="color:#a16207;">--</strong></div>
+    bar.innerHTML = `
+        <div id="fc-status-card" style="display:flex; align-items:center; gap:10px; padding:8px 16px; flex:1;">
+            <div id="fc-status-dot" style="width:10px; height:10px; border-radius:50%; background:#ef4444; flex-shrink:0;"></div>
+            <div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="fc-status-label" style="font-size:13px; font-weight:700; color:#fca5a5; letter-spacing:0.3px;">Not Signed In</span>
+                    <span id="fc-status-detail" style="font-size:12px; color:#94a3b8; display:none;"></span>
+                </div>
+                <div id="fc-shift-times" style="display:none; margin-top:2px; font-size:11px; color:#94a3b8; gap:12px;">
+                    <span><span style="color:#64748b;">Shift:</span> <strong id="fc-time-shift" style="color:#e2e8f0;">--</strong></span>
+                    <span><span style="color:#64748b;">Active:</span> <strong id="fc-time-active" style="color:#4ade80;">--</strong></span>
+                    <span><span style="color:#64748b;">Idle:</span> <strong id="fc-time-idle" style="color:#facc15;">--</strong></span>
+                </div>
             </div>
         </div>
+        <div id="fc-session-card" style="display:none; align-items:center; gap:10px; padding:8px 16px; border-left:1px solid #334155;">
+            <div id="fc-session-dot" style="width:10px; height:10px; background:#22c55e; border-radius:50%; flex-shrink:0; animation:fc-blink 1.5s infinite;"></div>
+            <div>
+                <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; line-height:1;">Chat Duration</div>
+                <div id="fc-session-timer" style="font-size:22px; font-weight:bold; color:#e2e8f0; font-variant-numeric:tabular-nums; line-height:1.2;">00:00</div>
+            </div>
+            <div id="fc-session-warning" style="display:none; font-size:11px; color:#fca5a5; font-weight:bold; margin-left:4px;"></div>
+        </div>
     `;
-    document.body.appendChild(badge);
+
+    const style = document.createElement("style");
+    style.id = "fc-top-bar-styles";
+    style.textContent = `
+        @keyframes fc-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        body { padding-top: 48px !important; }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(bar);
 }
 
 function removeStatusBadge() {
-    const badge = document.getElementById("fc-status-badge");
-    if (badge) badge.remove();
+    const bar = document.getElementById("fc-top-bar");
+    if (bar) bar.remove();
+    const barStyles = document.getElementById("fc-top-bar-styles");
+    if (barStyles) barStyles.remove();
 }
 
 async function updateStatusBadge() {
@@ -246,7 +268,7 @@ async function updateStatusBadge() {
         });
         const data = await res.json();
 
-        const badge = document.getElementById("fc-status-badge");
+        const statusCard = document.getElementById("fc-status-card");
         const dot = document.getElementById("fc-status-dot");
         const label = document.getElementById("fc-status-label");
         const detail = document.getElementById("fc-status-detail");
@@ -254,12 +276,10 @@ async function updateStatusBadge() {
         const timeShift = document.getElementById("fc-time-shift");
         const timeActive = document.getElementById("fc-time-active");
         const timeIdle = document.getElementById("fc-time-idle");
-        if (!badge || !dot || !label || !detail) return;
+        if (!statusCard || !dot || !label || !detail) return;
 
         currentStatus = data.status;
         const colors = STATUS_COLORS[data.status] || STATUS_COLORS.off_shift;
-        badge.style.background = colors.bg;
-        badge.style.borderColor = colors.border;
         dot.style.background = colors.dot;
         label.style.color = colors.text;
         label.textContent = STATUS_LABELS[data.status] || data.status;
@@ -267,25 +287,23 @@ async function updateStatusBadge() {
         if (data.status === "active") {
             const chatSec = Math.round((Date.now() - new Date(data.chat_started_at).getTime()) / 1000);
             detail.textContent = (data.chat_name || "Unknown") + " · " + formatStatusDuration(chatSec);
-            detail.style.display = "block";
+            detail.style.display = "inline";
         } else if (data.status === "idle") {
             const idleSec = Math.round((Date.now() - new Date(data.idle_since).getTime()) / 1000);
             detail.textContent = "Idle for " + formatStatusDuration(idleSec);
-            detail.style.display = "block";
+            detail.style.display = "inline";
         } else {
             detail.style.display = "none";
         }
 
-        // Sync session popup with server status
-        const sessionPopup = document.getElementById("fc-session-popup");
-        const isPopupVisible = sessionPopup && sessionPopup.style.display !== "none";
+        // Sync session card with server status
+        const sessionCard = getSessionCard();
+        const isSessionVisible = sessionCard && sessionCard.style.display !== "none";
 
-        if (data.status === "active" && !isPopupVisible && isChatPage) {
-            // Server says active but popup is hidden — show it with correct start time
+        if (data.status === "active" && !isSessionVisible && isChatPage) {
             showSessionPopup(new Date(data.chat_started_at).getTime());
             if (!currentSessionId) startIdleDetection();
-        } else if (data.status !== "active" && isPopupVisible) {
-            // Server says not active but popup is still showing — session was closed server-side
+        } else if (data.status !== "active" && isSessionVisible) {
             hideSessionPopup();
         }
 
@@ -298,7 +316,7 @@ async function updateStatusBadge() {
             timeShift.textContent = formatStatusDuration(shiftSeconds);
             timeActive.textContent = formatStatusDuration(activeSeconds);
             timeIdle.textContent = formatStatusDuration(idleSeconds);
-            shiftTimesContainer.style.display = "block";
+            shiftTimesContainer.style.display = "flex";
         } else if (shiftTimesContainer) {
             shiftTimesContainer.style.display = "none";
         }
@@ -318,48 +336,20 @@ function stopStatusPolling() {
 }
 
 function showNotSignedIn() {
-    const badge = document.getElementById("fc-status-badge");
     const dot = document.getElementById("fc-status-dot");
     const label = document.getElementById("fc-status-label");
     const detail = document.getElementById("fc-status-detail");
-    if (!badge || !dot || !label || !detail) return;
+    if (!dot || !label || !detail) return;
 
     const colors = STATUS_COLORS.not_signed_in;
-    badge.style.background = colors.bg;
-    badge.style.borderColor = colors.border;
     dot.style.background = colors.dot;
     label.style.color = colors.text;
     label.textContent = STATUS_LABELS.not_signed_in;
     detail.style.display = "none";
 }
 
-function createSessionPopup() {
-    let popup = document.getElementById("fc-session-popup");
-    if (popup) return popup;
-
-    popup = document.createElement("div");
-    popup.id = "fc-session-popup";
-    popup.style.cssText = `
-        position: fixed; bottom: 20px; left: 20px; z-index: 99999;
-        background: #fff; border-radius: 10px; padding: 14px 18px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15); border-left: 4px solid #28a745;
-        font-family: Arial, sans-serif; min-width: 200px; display: none;
-        transition: opacity 0.3s; opacity: 0;
-    `;
-    popup.innerHTML = `
-        <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Chat Duration</div>
-        <div style="display:flex; align-items:center; gap:8px;">
-            <div id="fc-session-dot" style="width:8px; height:8px; background:#28a745; border-radius:50%; animation:fc-blink 1.5s infinite;"></div>
-            <span id="fc-session-timer" style="font-size:28px; font-weight:bold; color:#333; font-variant-numeric:tabular-nums;">00:00</span>
-        </div>
-        <div id="fc-session-warning" style="display:none; margin-top:8px; font-size:12px; color:#dc3545; font-weight:bold;"></div>
-    `;
-
-    const style = document.createElement("style");
-    style.textContent = `@keyframes fc-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }`;
-    document.head.appendChild(style);
-    document.body.appendChild(popup);
-    return popup;
+function getSessionCard() {
+    return document.getElementById("fc-session-card");
 }
 
 function fetchMaxSessionThreshold() {
@@ -383,19 +373,18 @@ function fetchMaxSessionThreshold() {
 }
 
 function showSessionPopup(startTimeOverride) {
-    const popup = createSessionPopup();
+    const card = getSessionCard();
+    if (!card) return;
     sessionStartTime = startTimeOverride || Date.now();
-    popup.style.display = "block";
-    popup.style.borderLeftColor = "#28a745";
-    setTimeout(() => { popup.style.opacity = "1"; }, 10);
+    card.style.display = "flex";
 
     // Reset warning state
     const dot = document.getElementById("fc-session-dot");
     const warningEl = document.getElementById("fc-session-warning");
     const timerEl = document.getElementById("fc-session-timer");
-    if (dot) dot.style.background = "#28a745";
+    if (dot) dot.style.background = "#22c55e";
     if (warningEl) { warningEl.style.display = "none"; warningEl.textContent = ""; }
-    if (timerEl) timerEl.style.color = "#333";
+    if (timerEl) timerEl.style.color = "#e2e8f0";
 
     // Fetch latest threshold
     fetchMaxSessionThreshold();
@@ -415,15 +404,13 @@ function showSessionPopup(startTimeOverride) {
 
         // Check threshold
         if (elapsed >= maxSessionSeconds) {
-            const popup = document.getElementById("fc-session-popup");
             const dot = document.getElementById("fc-session-dot");
             const warningEl = document.getElementById("fc-session-warning");
-            if (popup) popup.style.borderLeftColor = "#dc3545";
-            if (dot) dot.style.background = "#dc3545";
-            if (timerEl) timerEl.style.color = "#dc3545";
+            if (dot) dot.style.background = "#ef4444";
+            if (timerEl) timerEl.style.color = "#fca5a5";
             if (warningEl) {
-                warningEl.textContent = "Session exceeds " + Math.round(maxSessionSeconds / 60) + " min limit!";
-                warningEl.style.display = "block";
+                warningEl.textContent = "Exceeds " + Math.round(maxSessionSeconds / 60) + " min!";
+                warningEl.style.display = "inline";
             }
         }
     }, 1000);
@@ -433,8 +420,8 @@ function hideSessionPopup() {
     if (sessionTimer) { clearInterval(sessionTimer); sessionTimer = null; }
     stopIdleDetection();
     currentSessionId = null;
-    const popup = document.getElementById("fc-session-popup");
-    if (popup) { popup.style.opacity = "0"; setTimeout(() => { popup.style.display = "none"; }, 300); }
+    const card = getSessionCard();
+    if (card) card.style.display = "none";
 }
 
 function attachClickHandlers() {
