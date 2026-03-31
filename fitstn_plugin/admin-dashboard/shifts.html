@@ -19,6 +19,7 @@
         .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: bold; }
         .badge-active { background: #d4edda; color: #155724; }
         .badge-ended { background: #e2e3e5; color: #383d41; }
+        .badge-break { background: #e0e7ff; color: #4338ca; }
 
         .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
         .toolbar .field { min-width: 160px; }
@@ -73,12 +74,13 @@
                 <th>Started At</th>
                 <th>Ended At</th>
                 <th>Duration</th>
+                <th>Break</th>
                 <th>Idle</th>
                 <th>Status</th>
             </tr>
         </thead>
         <tbody id="shifts-body">
-            <tr><td colspan="7" class="empty">Loading...</td></tr>
+            <tr><td colspan="8" class="empty">Loading...</td></tr>
         </tbody>
     </table>
     <script>
@@ -139,15 +141,30 @@
                 renderPeriodLabel(response.period);
                 const data = response.shifts;
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="empty">No shifts for this period.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" class="empty">No shifts for this period.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = data.map(row => {
                     const isActive = !row.shift_ended_at;
-                    const duration = isActive
-                        ? formatDuration(Math.round((Date.now() - new Date(row.shift_started_at).getTime()) / 1000))
-                        : formatDuration(row.duration_seconds);
+                    const isOnBreak = row.is_on_break;
+                    const breakSeconds = row.break_seconds || 0;
+                    const breakDisplay = breakSeconds > 0 ? formatDuration(breakSeconds) : '-';
+                    let duration;
+                    if (isActive) {
+                        const totalSec = Math.round((Date.now() - new Date(row.shift_started_at).getTime()) / 1000);
+                        duration = formatDuration(Math.max(0, totalSec - breakSeconds));
+                    } else {
+                        duration = formatDuration(row.duration_seconds);
+                    }
                     const idleDuration = row.idle_seconds != null ? formatDuration(row.idle_seconds) : '-';
+                    let statusBadge;
+                    if (isOnBreak) {
+                        statusBadge = '<span class="badge badge-break">On Break</span>';
+                    } else if (isActive) {
+                        statusBadge = '<span class="badge badge-active">Active</span>';
+                    } else {
+                        statusBadge = '<span class="badge badge-ended">Ended</span>';
+                    }
                     return `
                         <tr>
                             <td>${row.id}</td>
@@ -155,13 +172,14 @@
                             <td>${new Date(row.shift_started_at).toLocaleString()}</td>
                             <td>${isActive ? "-" : new Date(row.shift_ended_at).toLocaleString()}</td>
                             <td>${duration}</td>
+                            <td>${breakDisplay}</td>
                             <td>${idleDuration}</td>
-                            <td><span class="badge ${isActive ? 'badge-active' : 'badge-ended'}">${isActive ? 'Active' : 'Ended'}</span></td>
+                            <td>${statusBadge}</td>
                         </tr>
                     `;
                 }).join("");
             } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty">Failed to load shifts.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="empty">Failed to load shifts.</td></tr>';
             }
         }
         document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);

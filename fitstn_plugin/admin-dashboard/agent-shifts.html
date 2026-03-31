@@ -37,6 +37,7 @@
         .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: bold; }
         .badge-active { background: #d4edda; color: #155724; }
         .badge-ended { background: #e2e3e5; color: #383d41; }
+        .badge-break { background: #e0e7ff; color: #4338ca; }
     </style>
 </head>
 <body>
@@ -176,6 +177,7 @@
                                 <th>Started At</th>
                                 <th>Ended At</th>
                                 <th>Duration</th>
+                                <th>Break</th>
                                 <th>Idle</th>
                                 <th>Status</th>
                             </tr>
@@ -185,9 +187,17 @@
 
                 data.shifts.forEach(shift => {
                     const isActive = !shift.shift_ended_at;
-                    const statusBadge = isActive
-                        ? '<span class="badge badge-active">Active</span>'
-                        : '<span class="badge badge-ended">Ended</span>';
+                    const isOnBreak = shift.is_on_break;
+                    const breakSeconds = shift.break_seconds || 0;
+                    const breakDisplay = breakSeconds > 0 ? formatDuration(breakSeconds) : '-';
+                    let statusBadge;
+                    if (isOnBreak) {
+                        statusBadge = '<span class="badge badge-break">On Break</span>';
+                    } else if (isActive) {
+                        statusBadge = '<span class="badge badge-active">Active</span>';
+                    } else {
+                        statusBadge = '<span class="badge badge-ended">Ended</span>';
+                    }
 
                     tableHtml += `
                         <tr>
@@ -195,6 +205,7 @@
                             <td>${formatDateTime(shift.shift_started_at)}</td>
                             <td>${shift.shift_ended_at ? formatDateTime(shift.shift_ended_at) : '-'}</td>
                             <td>${formatDuration(shift.duration_seconds)}</td>
+                            <td>${breakDisplay}</td>
                             <td>${formatDuration(shift.idle_seconds)}</td>
                             <td>${statusBadge}</td>
                         </tr>
