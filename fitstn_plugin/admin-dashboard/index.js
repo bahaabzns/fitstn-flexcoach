@@ -660,6 +660,18 @@ app.listen(PORT, async () => {
             ON activity_events (agent_id, created_at DESC)
         `;
 
+        // Prevent duplicate active shifts per agent (race condition safety net)
+        await sql`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_shift_per_agent
+            ON shifts (agent_id) WHERE shift_ended_at IS NULL
+        `;
+
+        // Prevent duplicate active breaks per shift (race condition safety net)
+        await sql`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_break_per_shift
+            ON shift_breaks (shift_id) WHERE ended_at IS NULL
+        `;
+
         // Add type column to salary_overtime if it doesn't exist
         await sql`ALTER TABLE salary_overtime ADD COLUMN IF NOT EXISTS type VARCHAR(10) NOT NULL DEFAULT 'hours'`;
 
