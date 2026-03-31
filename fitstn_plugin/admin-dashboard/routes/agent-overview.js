@@ -74,13 +74,7 @@ module.exports = function (sql) {
                     WHERE s.agent_id = sh.agent_id
                     AND s.clicked_at < COALESCE(sh.shift_ended_at, NOW())
                     AND COALESCE(s.ended_at, NOW()) > sh.shift_started_at
-                    ))::int as active_in_shift_seconds,
-                    SUM((SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
-                        COALESCE(sb.ended_at, COALESCE(sh.shift_ended_at, NOW())) - sb.started_at
-                    ))), 0)::int
-                    FROM shift_breaks sb
-                    WHERE sb.shift_id = sh.id
-                    ))::int as break_seconds
+                    ))::int as active_in_shift_seconds
                 FROM shifts sh
                 WHERE sh.agent_id = ${agentId}
                 AND sh.shift_started_at >= ${startDate}::date
@@ -107,15 +101,13 @@ module.exports = function (sql) {
             `;
 
             const totalShiftSeconds = shiftData.reduce((sum, r) => sum + (r.shift_seconds || 0), 0);
-            const totalBreakSeconds = shiftData.reduce((sum, r) => sum + (r.break_seconds || 0), 0);
-            const effectiveShiftSeconds = Math.max(0, totalShiftSeconds - totalBreakSeconds);
             const totalActiveInShift = shiftData.reduce((sum, r) => sum + (r.active_in_shift_seconds || 0), 0);
             const totalSessions = sessionData.reduce((sum, r) => sum + r.session_count, 0);
             const totalActiveSeconds = sessionData.reduce((sum, r) => sum + (r.active_seconds || 0), 0);
             const totalMessages = sessionData.reduce((sum, r) => sum + (r.total_messages || 0), 0);
-            const totalIdleSeconds = Math.max(0, effectiveShiftSeconds - totalActiveInShift);
-            const productivityPercentage = effectiveShiftSeconds > 0
-                ? Math.round((totalActiveInShift / effectiveShiftSeconds) * 100)
+            const totalIdleSeconds = Math.max(0, totalShiftSeconds - totalActiveInShift);
+            const productivityPercentage = totalShiftSeconds > 0
+                ? Math.round((totalActiveInShift / totalShiftSeconds) * 100)
                 : 0;
             const averageSessionSeconds = totalSessions > 0
                 ? Math.round(totalActiveSeconds / totalSessions)
@@ -188,7 +180,7 @@ module.exports = function (sql) {
                     sh.id, sh.shift_started_at, sh.shift_ended_at,
                     EXTRACT(EPOCH FROM (
                         COALESCE(sh.shift_ended_at, NOW()) - sh.shift_started_at
-                    ))::int as total_shift_seconds,
+                    ))::int as duration_seconds,
                     (SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM (
                         LEAST(COALESCE(s.ended_at, COALESCE(sh.shift_ended_at, NOW())), COALESCE(sh.shift_ended_at, NOW()))
                         - GREATEST(s.clicked_at, sh.shift_started_at)
@@ -197,13 +189,7 @@ module.exports = function (sql) {
                     WHERE s.agent_id = sh.agent_id
                     AND s.clicked_at < COALESCE(sh.shift_ended_at, NOW())
                     AND COALESCE(s.ended_at, NOW()) > sh.shift_started_at
-                    ) as active_seconds,
-                    (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
-                        COALESCE(sb.ended_at, COALESCE(sh.shift_ended_at, NOW())) - sb.started_at
-                    ))), 0)::int
-                    FROM shift_breaks sb
-                    WHERE sb.shift_id = sh.id
-                    ) as break_seconds
+                    ) as active_seconds
                 FROM shifts sh
                 WHERE sh.agent_id = ${agentId}
                 AND sh.shift_started_at >= ${startDate}::date
@@ -211,16 +197,10 @@ module.exports = function (sql) {
                 ORDER BY sh.shift_started_at DESC
             `;
 
-            const shiftsWithIdle = shiftsList.map(sh => {
-                const breakSec = sh.break_seconds || 0;
-                const effectiveDuration = Math.max(0, sh.total_shift_seconds - breakSec);
-                return {
-                    ...sh,
-                    duration_seconds: effectiveDuration,
-                    break_seconds: breakSec,
-                    idle_seconds: Math.max(0, effectiveDuration - sh.active_seconds),
-                };
-            });
+            const shiftsWithIdle = shiftsList.map(sh => ({
+                ...sh,
+                idle_seconds: Math.max(0, sh.duration_seconds - sh.active_seconds)
+            }));
 
             // Response time metrics from activity events
             const responseTimeData = await sql`
@@ -244,8 +224,7 @@ module.exports = function (sql) {
                 salary_history: salaryHistory.reverse(),
                 performance: {
                     total_sessions: totalSessions,
-                    total_shift_seconds: effectiveShiftSeconds,
-                    total_break_seconds: totalBreakSeconds,
+                    total_shift_seconds: totalShiftSeconds,
                     total_active_seconds: totalActiveSeconds,
                     total_idle_seconds: totalIdleSeconds,
                     productivity_percentage: productivityPercentage,
@@ -312,7 +291,7 @@ module.exports = function (sql) {
                     sh.id, sh.shift_started_at, sh.shift_ended_at,
                     EXTRACT(EPOCH FROM (
                         COALESCE(sh.shift_ended_at, NOW()) - sh.shift_started_at
-                    ))::int as total_shift_seconds,
+                    ))::int as duration_seconds,
                     (SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM (
                         LEAST(COALESCE(s.ended_at, COALESCE(sh.shift_ended_at, NOW())), COALESCE(sh.shift_ended_at, NOW()))
                         - GREATEST(s.clicked_at, sh.shift_started_at)
@@ -321,17 +300,7 @@ module.exports = function (sql) {
                     WHERE s.agent_id = sh.agent_id
                     AND s.clicked_at < COALESCE(sh.shift_ended_at, NOW())
                     AND COALESCE(s.ended_at, NOW()) > sh.shift_started_at
-                    ) as active_seconds,
-                    (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
-                        COALESCE(sb.ended_at, COALESCE(sh.shift_ended_at, NOW())) - sb.started_at
-                    ))), 0)::int
-                    FROM shift_breaks sb
-                    WHERE sb.shift_id = sh.id
-                    ) as break_seconds,
-                    (SELECT EXISTS(
-                        SELECT 1 FROM shift_breaks sb
-                        WHERE sb.shift_id = sh.id AND sb.ended_at IS NULL
-                    )) as is_on_break
+                    ) as active_seconds
                 FROM shifts sh
                 WHERE sh.agent_id = ${agentId}
                 AND sh.shift_started_at >= ${startDate}::date
@@ -339,17 +308,10 @@ module.exports = function (sql) {
                 ORDER BY sh.shift_started_at DESC
             `;
 
-            const shiftsWithIdle = shifts.map(sh => {
-                const breakSeconds = sh.break_seconds || 0;
-                const effectiveDuration = Math.max(0, sh.total_shift_seconds - breakSeconds);
-                return {
-                    ...sh,
-                    duration_seconds: effectiveDuration,
-                    break_seconds: breakSeconds,
-                    is_on_break: sh.is_on_break || false,
-                    idle_seconds: Math.max(0, effectiveDuration - sh.active_seconds),
-                };
-            });
+            const shiftsWithIdle = shifts.map(sh => ({
+                ...sh,
+                idle_seconds: Math.max(0, sh.duration_seconds - sh.active_seconds)
+            }));
 
             res.json({ period: { type: period, start: startDate, end: endDate }, shifts: shiftsWithIdle });
         } catch (err) {
