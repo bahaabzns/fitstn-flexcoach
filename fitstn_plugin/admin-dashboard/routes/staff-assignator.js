@@ -75,9 +75,9 @@ module.exports = function (requireAdmin) {
         return allCookies;
     }
 
-    async function fetchCrmData(cookie) {
+    async function fetchCrmClientCount(cookie) {
         const res = await fetch(
-            `${CRM_BASE}/api/queue/list?sortBy=code&sortDirection=asc&page=1&limit=4000`,
+            `${CRM_BASE}/api/queue/list?sortBy=code&sortDirection=asc&page=1&limit=1`,
             { headers: { Cookie: cookie } }
         );
         const contentType = res.headers.get("content-type") || "";
@@ -87,7 +87,23 @@ module.exports = function (requireAdmin) {
         }
         if (!res.ok) throw new Error(`CRM API error: ${res.status} ${res.statusText}`);
         const json = await res.json();
-        return Array.isArray(json) ? json : json.data || json.queueItems || json.items || json;
+        return json.total || 5000;
+    }
+
+    async function fetchCrmData(cookie) {
+        const totalClients = await fetchCrmClientCount(cookie);
+        const res = await fetch(
+            `${CRM_BASE}/api/queue/list?sortBy=code&sortDirection=asc&page=1&limit=${totalClients}`,
+            { headers: { Cookie: cookie } }
+        );
+        const contentType = res.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+            const snippet = (await res.text()).substring(0, 200);
+            throw new Error(`CRM returned non-JSON (${res.status}). Likely auth failed. Response: ${snippet}`);
+        }
+        if (!res.ok) throw new Error(`CRM API error: ${res.status} ${res.statusText}`);
+        const json = await res.json();
+        return json.queueItems || json.data || json.items || (Array.isArray(json) ? json : json);
     }
 
     // ── FlexCoach helpers ──
@@ -137,8 +153,44 @@ module.exports = function (requireAdmin) {
         return allRooms;
     }
 
+    // ── Group room partner lookup ──
+    async function fetchGroupRoomPartners(groupRoomIds) {
+        const { data: members, error } = await supabase
+            .from("chat_room_members")
+            .select("room_id, client_id")
+            .in("room_id", groupRoomIds)
+            .not("client_id", "is", null);
+
+        if (error) return {};
+
+        const clientIds = [...new Set(members.map(m => m.client_id))];
+        if (clientIds.length === 0) return {};
+
+        const { data: clients, error: clientError } = await supabase
+            .from("clients")
+            .select("id, code")
+            .in("id", clientIds);
+
+        if (clientError) return {};
+
+        const clientCodeById = {};
+        for (const c of clients) {
+            clientCodeById[c.id] = c.code?.toString();
+        }
+
+        const partnersByRoom = {};
+        for (const m of members) {
+            const code = clientCodeById[m.client_id];
+            if (!code) continue;
+            if (!partnersByRoom[m.room_id]) partnersByRoom[m.room_id] = [];
+            partnersByRoom[m.room_id].push(code);
+        }
+
+        return partnersByRoom;
+    }
+
     // ── Mapping ──
-    function buildMapping(crmItems, flexRooms, staffData) {
+    async function buildMapping(crmItems, flexRooms, staffData) {
         const flexByCode = {};
         for (const room of flexRooms) {
             const code = room.client?.code?.toString();
@@ -148,6 +200,12 @@ module.exports = function (requireAdmin) {
         const staffCrmToFlex = {};
         for (const s of staffData.staff) {
             staffCrmToFlex[s.crm_id] = { flexcoach_id: s.flexcoach_id, name: s.name };
+        }
+
+        const crmByCode = {};
+        for (const item of crmItems) {
+            const code = item.client?.code?.toString();
+            if (code) crmByCode[code] = item;
         }
 
         const mapped = [];
@@ -176,6 +234,44 @@ module.exports = function (requireAdmin) {
                 flexcoach_agent_name: staffEntry?.name || null,
             });
             matched++;
+        }
+
+        // Handle Fit Due (group) rooms — add partner agents
+        const groupRooms = flexRooms.filter(r => r.is_group);
+        if (groupRooms.length > 0) {
+            const partnersByRoom = await fetchGroupRoomPartners(groupRooms.map(r => r.id));
+
+            let fitDueAdded = 0;
+            for (const room of groupRooms) {
+                const partnerCodes = partnersByRoom[room.id] || [];
+                const existingAgents = new Set();
+                mapped.filter(m => m.chat_room_id === room.id).forEach(m => {
+                    if (m.flexcoach_agent_id) existingAgents.add(m.flexcoach_agent_id);
+                });
+
+                for (const partnerCode of partnerCodes) {
+                    const crmItem = crmByCode[partnerCode];
+                    if (!crmItem) continue;
+
+                    const activeAssignment = crmItem.client?.assignments?.find(a => a.isActive);
+                    if (!activeAssignment) continue;
+
+                    const staffEntry = staffCrmToFlex[activeAssignment.agentId];
+                    if (!staffEntry || existingAgents.has(staffEntry.flexcoach_id)) continue;
+
+                    existingAgents.add(staffEntry.flexcoach_id);
+                    mapped.push({
+                        client_code: parseInt(partnerCode, 10),
+                        client_name: crmItem.client?.name || null,
+                        chat_room_id: room.id,
+                        crm_agent_id: activeAssignment.agentId,
+                        crm_agent_name: activeAssignment.agent?.name || null,
+                        flexcoach_agent_id: staffEntry.flexcoach_id,
+                        flexcoach_agent_name: staffEntry.name,
+                    });
+                    fitDueAdded++;
+                }
+            }
         }
 
         return { mapped, matched, unmatched };
@@ -241,7 +337,7 @@ module.exports = function (requireAdmin) {
             const flexRooms = await fetchFlexCoachRooms();
 
             // Step 3: Build mapping
-            const { mapped, matched, unmatched } = buildMapping(crmItems, flexRooms, staffData);
+            const { mapped, matched, unmatched } = await buildMapping(crmItems, flexRooms, staffData);
 
             // Step 4: Inject (or preview in dry run)
             const assignable = mapped.filter(m => m.flexcoach_agent_id && m.chat_room_id);

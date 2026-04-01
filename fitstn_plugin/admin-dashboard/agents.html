@@ -93,6 +93,20 @@
                 <label for="agent-fitstn-id">Fitstn ID</label>
                 <input type="text" id="agent-fitstn-id" placeholder="Supabase staff UUID">
             </div>
+        </div>
+        <div class="form-row" style="margin-top: 12px;">
+            <div class="field" style="max-width: 160px;">
+                <label for="agent-shift-start">Shift Start Time</label>
+                <input type="time" id="agent-shift-start" placeholder="11:00">
+            </div>
+            <div class="field" style="max-width: 160px;">
+                <label for="agent-shift-end">Shift End Time</label>
+                <input type="time" id="agent-shift-end" placeholder="19:00">
+            </div>
+            <div class="field" style="max-width: 160px;">
+                <label for="agent-sla-cutoff">SLA Cutoff Time</label>
+                <input type="time" id="agent-sla-cutoff" placeholder="18:00">
+            </div>
             <div>
                 <button class="btn btn-primary" id="form-submit-btn" onclick="submitForm()">Create</button>
                 <button class="btn btn-secondary" id="form-cancel-btn" onclick="cancelEdit()" style="display:none;">Cancel</button>
@@ -107,13 +121,16 @@
                 <th>Email</th>
                 <th>Name</th>
                 <th>Fitstn ID</th>
+                <th>Shift Start</th>
+                <th>Shift End</th>
+                <th>SLA Cutoff</th>
                 <th>Status</th>
                 <th>Created</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody id="agents-body">
-            <tr><td colspan="7" class="empty">Loading...</td></tr>
+            <tr><td colspan="10" class="empty">Loading...</td></tr>
         </tbody>
     </table>
 
@@ -122,6 +139,15 @@
         if (!token) { window.location.href = '/'; }
 
         let editingId = null;
+
+        function formatTime(timeStr) {
+            if (!timeStr) return '-';
+            const [hours, minutes] = timeStr.split(':');
+            const hour = parseInt(hours, 10);
+            const suffix = hour >= 12 ? 'PM' : 'AM';
+            const displayHour = hour % 12 || 12;
+            return displayHour + ':' + minutes + ' ' + suffix;
+        }
 
         function authFetch(url, options = {}) {
             options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
@@ -151,7 +177,7 @@
                 const res = await authFetch('/api/agents');
                 const data = await res.json();
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="empty">No agents yet. Create one above.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10" class="empty">No agents yet. Create one above.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = data.map(a => `
@@ -160,10 +186,13 @@
                         <td>${a.email}</td>
                         <td>${a.name || '-'}</td>
                         <td style="font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${a.fitstn_id || ''}">${a.fitstn_id || '-'}</td>
+                        <td>${formatTime(a.shift_start_time)}</td>
+                        <td>${formatTime(a.shift_end_time)}</td>
+                        <td>${formatTime(a.sla_cutoff_time)}</td>
                         <td><span class="${a.is_active ? 'status-active' : 'status-inactive'}">${a.is_active ? 'Active' : 'Inactive'}</span></td>
                         <td>${new Date(a.created_at).toLocaleString()}</td>
                         <td class="actions">
-                            <button class="btn btn-primary btn-sm" onclick="startEdit(${a.id}, '${a.email.replace(/'/g, "\\'")}', '${(a.name || '').replace(/'/g, "\\'")}', '${(a.fitstn_id || '').replace(/'/g, "\\'")}')">Edit</button>
+                            <button class="btn btn-primary btn-sm" onclick="startEdit(${a.id}, '${a.email.replace(/'/g, "\\'")}', '${(a.name || '').replace(/'/g, "\\'")}', '${(a.fitstn_id || '').replace(/'/g, "\\'")}', '${a.shift_start_time || ''}', '${a.shift_end_time || ''}', '${a.sla_cutoff_time || ''}')">Edit</button>
                             ${a.is_active
                                 ? `<button class="btn btn-danger btn-sm" onclick="deleteAgent(${a.id})">Deactivate</button>`
                                 : `<button class="btn btn-secondary btn-sm" onclick="reactivateAgent(${a.id})">Reactivate</button>`
@@ -172,7 +201,7 @@
                     </tr>
                 `).join('');
             } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty">Failed to load agents.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" class="empty">Failed to load agents.</td></tr>';
             }
         }
 
@@ -181,12 +210,15 @@
             const password = document.getElementById('agent-password').value;
             const name = document.getElementById('agent-name').value.trim();
             const fitstn_id = document.getElementById('agent-fitstn-id').value.trim();
+            const shift_start_time = document.getElementById('agent-shift-start').value || null;
+            const shift_end_time = document.getElementById('agent-shift-end').value || null;
+            const sla_cutoff_time = document.getElementById('agent-sla-cutoff').value || null;
 
             if (!email) { showMsg('Email is required', 'error'); return; }
 
             if (editingId) {
                 // Update
-                const body = { email, name, fitstn_id };
+                const body = { email, name, fitstn_id, shift_start_time, shift_end_time, sla_cutoff_time };
                 if (password) body.password = password;
                 try {
                     const res = await authFetch('/api/agents/' + editingId, {
@@ -209,7 +241,7 @@
                     const res = await authFetch('/api/agents', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email, password, name, fitstn_id })
+                        body: JSON.stringify({ email, password, name, fitstn_id, shift_start_time, shift_end_time, sla_cutoff_time })
                     });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.error);
@@ -218,6 +250,9 @@
                     document.getElementById('agent-password').value = '';
                     document.getElementById('agent-name').value = '';
                     document.getElementById('agent-fitstn-id').value = '';
+                    document.getElementById('agent-shift-start').value = '';
+                    document.getElementById('agent-shift-end').value = '';
+                    document.getElementById('agent-sla-cutoff').value = '';
                     loadAgents();
                 } catch (err) {
                     showMsg(err.message || 'Failed to create agent', 'error');
@@ -225,12 +260,15 @@
             }
         }
 
-        function startEdit(id, email, name, fitst_id) {
+        function startEdit(id, email, name, fitst_id, shiftStart, shiftEnd, slaCutoff) {
             editingId = id;
             document.getElementById('agent-email').value = email;
             document.getElementById('agent-password').value = '';
             document.getElementById('agent-name').value = name;
             document.getElementById('agent-fitstn-id').value = fitst_id || '';
+            document.getElementById('agent-shift-start').value = shiftStart || '';
+            document.getElementById('agent-shift-end').value = shiftEnd || '';
+            document.getElementById('agent-sla-cutoff').value = slaCutoff || '';
             document.getElementById('form-title').textContent = 'Edit Agent #' + id;
             document.getElementById('form-submit-btn').textContent = 'Update';
             document.getElementById('form-cancel-btn').style.display = 'inline-block';
@@ -243,6 +281,9 @@
             document.getElementById('agent-password').value = '';
             document.getElementById('agent-name').value = '';
             document.getElementById('agent-fitstn-id').value = '';
+            document.getElementById('agent-shift-start').value = '';
+            document.getElementById('agent-shift-end').value = '';
+            document.getElementById('agent-sla-cutoff').value = '';
             document.getElementById('form-title').textContent = 'Create Agent';
             document.getElementById('form-submit-btn').textContent = 'Create';
             document.getElementById('form-cancel-btn').style.display = 'none';
