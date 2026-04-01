@@ -102,6 +102,17 @@
             <input type="number" id="max-shift-hours" min="1" max="24" value="14">
             <div class="hint">Automatically end shifts that exceed this duration (closes open sessions and breaks too).</div>
         </div>
+        <h2 style="margin-top: 24px;">Workload Settings</h2>
+        <div class="field">
+            <label for="sla-cutoff-time">SLA Cutoff Time</label>
+            <input type="time" id="sla-cutoff-time" value="14:00" style="width: 120px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+            <div class="hint">After this time, any new client messages are deferred to the next workday.</div>
+        </div>
+        <div class="field">
+            <label for="avg-minutes-per-chat">Avg minutes per chat</label>
+            <input type="number" id="avg-minutes-per-chat" min="1" max="120" value="10">
+            <div class="hint">Estimated average time an agent spends replying to one chat. Used to calculate workload capacity.</div>
+        </div>
         <div class="actions">
             <button class="btn btn-primary" id="save-btn">Save</button>
             <span class="msg success" id="success-msg">Settings saved.</span>
@@ -151,6 +162,8 @@
         const idleInSessionInput = document.getElementById('idle-in-session-min');
         const sessionTimeoutInput = document.getElementById('session-timeout-min');
         const maxShiftHoursInput = document.getElementById('max-shift-hours');
+        const slaCutoffTimeInput = document.getElementById('sla-cutoff-time');
+        const avgMinutesPerChatInput = document.getElementById('avg-minutes-per-chat');
         const saveBtn = document.getElementById('save-btn');
         const successMsg = document.getElementById('success-msg');
         const errorMsg = document.getElementById('error-msg');
@@ -165,6 +178,8 @@
                 if (data.idle_inside_session_minutes) idleInSessionInput.value = data.idle_inside_session_minutes;
                 if (data.session_timeout_minutes) sessionTimeoutInput.value = data.session_timeout_minutes;
                 if (data.max_shift_hours) maxShiftHoursInput.value = data.max_shift_hours;
+                if (data.sla_cutoff_time) slaCutoffTimeInput.value = data.sla_cutoff_time;
+                if (data.avg_minutes_per_chat) avgMinutesPerChatInput.value = data.avg_minutes_per_chat;
             } catch (err) {
                 errorMsg.textContent = 'Failed to load settings.';
                 errorMsg.style.display = 'inline';
@@ -186,6 +201,8 @@
                         idle_inside_session_minutes: parseInt(idleInSessionInput.value),
                         session_timeout_minutes: parseInt(sessionTimeoutInput.value),
                         max_shift_hours: parseInt(maxShiftHoursInput.value),
+                        sla_cutoff_time: slaCutoffTimeInput.value,
+                        avg_minutes_per_chat: parseInt(avgMinutesPerChatInput.value),
                     }),
                 });
                 const data = await res.json();

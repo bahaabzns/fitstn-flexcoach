@@ -442,6 +442,107 @@ app.get("/api/agent-demand", requireAdmin, async (req, res) => {
     }
 });
 
+app.get("/api/agent-workload", requireAdmin, async (req, res) => {
+    try {
+        const settingsRows = await sql`SELECT key, value FROM settings WHERE key IN ('avg_minutes_per_chat', 'sla_cutoff_time')`;
+        const settings = {};
+        for (const row of settingsRows) settings[row.key] = row.value;
+        const avgMinutesPerChat = parseInt(settings.avg_minutes_per_chat) || 10;
+        const slaCutoffTime = settings.sla_cutoff_time || '14:00';
+
+        const agents = await sql`
+            SELECT id, name, email, fitstn_id
+            FROM agents
+            WHERE is_active = true AND fitstn_id IS NOT NULL AND fitstn_id != ''
+        `;
+
+        if (agents.length === 0) {
+            return res.json({ agents: [], sla_cutoff_time: slaCutoffTime, avg_minutes_per_chat: avgMinutesPerChat });
+        }
+
+        await ensureSupabaseAuth();
+
+        const rpcParams = (overrides) => ({
+            p_assigned_staff_id: null,
+            p_client_gender: null,
+            p_coach_id: null,
+            p_ghost_days: null,
+            p_ghost_only: false,
+            p_last_interaction: null,
+            p_last_interaction_from: null,
+            p_last_interaction_to: null,
+            p_last_message_from: "client",
+            p_limit: 1,
+            p_no_assigned_staff: false,
+            p_offset: 0,
+            p_package_id: null,
+            p_search: null,
+            p_staff_id: null,
+            p_subscription_start_date: null,
+            p_subscription_start_weekday: null,
+            p_subscription_status: null,
+            p_subscription_t_status: null,
+            p_tenant_id: "fitstn",
+            p_unread_only: false,
+            ...overrides,
+        });
+
+        const [hours, minutes] = slaCutoffTime.split(':').map(Number);
+        const now = new Date();
+        const cutoffToday = new Date(now);
+        cutoffToday.setHours(hours, minutes, 0, 0);
+        const hoursRemaining = Math.max(0, (cutoffToday - now) / (1000 * 60 * 60));
+        const isPastCutoff = hoursRemaining === 0;
+        const maxChatsPerHour = 60 / avgMinutesPerChat;
+
+        const agentPromises = agents.map(async (agent) => {
+            try {
+                const { data, error } = await supabase.rpc("get_chat_rooms_paginated", rpcParams({ p_assigned_staff_id: agent.fitstn_id }));
+
+                if (error) {
+                    console.error(`Workload fetch failed for ${agent.name}:`, error.message);
+                    return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: error.message };
+                }
+
+                const demandCount = data?.total || 0;
+                const requiredPace = isPastCutoff ? demandCount : (hoursRemaining > 0 ? demandCount / hoursRemaining : 0);
+                const workloadRatio = maxChatsPerHour > 0 ? requiredPace / maxChatsPerHour : 0;
+
+                let status = 'comfortable';
+                if (isPastCutoff && demandCount > 0) status = 'overloaded';
+                else if (workloadRatio > 1) status = 'overloaded';
+                else if (workloadRatio > 0.7) status = 'busy';
+
+                return {
+                    agent_id: agent.id,
+                    agent_name: agent.name,
+                    demand_count: demandCount,
+                    required_pace: Math.round(requiredPace * 10) / 10,
+                    workload_ratio: Math.round(workloadRatio * 100) / 100,
+                    status,
+                };
+            } catch (err) {
+                console.error(`Workload fetch error for ${agent.name}:`, err.message);
+                return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: err.message };
+            }
+        });
+
+        const workloadResults = await Promise.all(agentPromises);
+
+        res.json({
+            agents: workloadResults,
+            sla_cutoff_time: slaCutoffTime,
+            hours_remaining: Math.round(hoursRemaining * 10) / 10,
+            is_past_cutoff: isPastCutoff,
+            avg_minutes_per_chat: avgMinutesPerChat,
+            max_chats_per_hour: maxChatsPerHour,
+        });
+    } catch (err) {
+        console.error("GET /api/agent-workload error:", err.message);
+        res.status(500).json({ error: "Failed to fetch agent workload", details: err.message });
+    }
+});
+
 app.post("/api/chat-click", requireAgent, async (req, res) => {
     try {
         const { chatName, chatPreview } = req.body;
@@ -534,13 +635,14 @@ app.get("/api/settings", requireAdmin, async (req, res) => {
 
 app.put("/api/settings", requireAdmin, async (req, res) => {
     try {
-        const { idle_warning_minutes, idle_critical_minutes, max_session_minutes, idle_inside_session_minutes, session_timeout_minutes, max_shift_hours } = req.body;
+        const { idle_warning_minutes, idle_critical_minutes, max_session_minutes, idle_inside_session_minutes, session_timeout_minutes, max_shift_hours, avg_minutes_per_chat, sla_cutoff_time } = req.body;
         const warning = parseInt(idle_warning_minutes);
         const critical = parseInt(idle_critical_minutes);
         const maxSession = parseInt(max_session_minutes);
         const idleInSession = parseInt(idle_inside_session_minutes);
         const sessionTimeout = parseInt(session_timeout_minutes);
         const maxShiftHours = parseInt(max_shift_hours);
+        const avgMinutesPerChat = parseInt(avg_minutes_per_chat);
         if (!warning || !critical || warning < 1 || critical < 1 || warning >= critical) {
             return res.status(400).json({ error: "Invalid values. Warning must be less than critical, both must be >= 1." });
         }
@@ -556,6 +658,12 @@ app.put("/api/settings", requireAdmin, async (req, res) => {
         if (!maxShiftHours || maxShiftHours < 1) {
             return res.status(400).json({ error: "Max shift hours must be >= 1." });
         }
+        if (!avgMinutesPerChat || avgMinutesPerChat < 1) {
+            return res.status(400).json({ error: "Avg minutes per chat must be >= 1." });
+        }
+        if (!sla_cutoff_time || !/^\d{2}:\d{2}$/.test(sla_cutoff_time)) {
+            return res.status(400).json({ error: "SLA cutoff time must be in HH:MM format." });
+        }
 
         const settingsToSave = {
             idle_warning_minutes: String(warning),
@@ -564,6 +672,8 @@ app.put("/api/settings", requireAdmin, async (req, res) => {
             idle_inside_session_minutes: String(idleInSession),
             session_timeout_minutes: String(sessionTimeout),
             max_shift_hours: String(maxShiftHours),
+            avg_minutes_per_chat: String(avgMinutesPerChat),
+            sla_cutoff_time: sla_cutoff_time,
         };
         for (const [key, value] of Object.entries(settingsToSave)) {
             await sql`
@@ -714,7 +824,9 @@ app.listen(PORT, async () => {
                 ('max_session_minutes', '30'),
                 ('idle_inside_session_minutes', '2'),
                 ('session_timeout_minutes', '10'),
-                ('max_shift_hours', '14')
+                ('max_shift_hours', '14'),
+                ('avg_minutes_per_chat', '10'),
+                ('sla_cutoff_time', '14:00')
             ON CONFLICT (key) DO NOTHING
         `;
 

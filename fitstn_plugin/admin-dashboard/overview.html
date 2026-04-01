@@ -163,6 +163,34 @@
         .demand-card.unassigned { border-left-color: #6c757d; background: #f8f8f8; }
         .demand-card.unassigned .demand-count { color: #6c757d; }
         .demand-total { font-size: 14px; color: #555; margin-bottom: 12px; }
+
+        /* Workload section */
+        .workload-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+        .workload-card {
+            background: #fff; border-radius: 8px; padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            min-width: 220px; flex: 1 1 240px; max-width: 320px;
+            border-left: 4px solid #28a745;
+        }
+        .workload-card.status-busy { border-left-color: #fd7e14; }
+        .workload-card.status-overloaded { border-left-color: #dc3545; }
+        .workload-card .wl-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .workload-card .wl-agent { font-weight: 600; color: #333; font-size: 14px; }
+        .workload-card .wl-badge {
+            font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase;
+        }
+        .wl-badge.comfortable { background: #d4edda; color: #155724; }
+        .wl-badge.busy { background: #fff3cd; color: #856404; }
+        .wl-badge.overloaded { background: #f8d7da; color: #721c24; }
+        .workload-card .wl-stats { font-size: 13px; color: #555; line-height: 1.7; }
+        .workload-card .wl-stats strong { color: #333; }
+        .workload-card .wl-bar { height: 6px; background: #e9ecef; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .workload-card .wl-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+        .wl-bar-fill.comfortable { background: #28a745; }
+        .wl-bar-fill.busy { background: #fd7e14; }
+        .wl-bar-fill.overloaded { background: #dc3545; }
+        .workload-summary { font-size: 14px; color: #555; margin-bottom: 12px; }
+        .workload-summary span { font-weight: 600; }
     </style>
 </head>
 <body>
@@ -196,6 +224,15 @@
             <div id="demand-total" class="demand-total"></div>
             <div id="demand-container" class="demand-grid">
                 <div class="empty">Loading demand...</div>
+            </div>
+        </div>
+
+        <!-- Agent Workload Section -->
+        <div id="workload-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 8px;">Agent Workload <span id="workload-refresh-time" style="font-size:12px; color:#999; font-weight:normal;"></span></h2>
+            <div id="workload-summary" class="workload-summary"></div>
+            <div id="workload-container" class="workload-grid">
+                <div class="empty">Loading workload...</div>
             </div>
         </div>
 
@@ -955,6 +992,63 @@
         }
 
         // =====================
+        // AGENT WORKLOAD
+        // =====================
+        async function loadAgentWorkload() {
+            if (!isAdmin) return;
+            const container = document.getElementById('workload-container');
+            const summaryLabel = document.getElementById('workload-summary');
+            const refreshTime = document.getElementById('workload-refresh-time');
+            try {
+                const res = await authFetch('/api/agent-workload');
+                const data = await res.json();
+
+                if (!data.agents || data.agents.length === 0) {
+                    container.innerHTML = '<div class="empty">No agents with Fitstn ID configured.</div>';
+                    summaryLabel.textContent = '';
+                    return;
+                }
+
+                const cutoffLabel = data.sla_cutoff_time || '--:--';
+                const hoursLeft = data.hours_remaining;
+                const isPast = data.is_past_cutoff;
+                const avgMin = data.avg_minutes_per_chat;
+
+                summaryLabel.innerHTML = 'SLA Cutoff: <span>' + cutoffLabel + '</span>' +
+                    (isPast
+                        ? ' &mdash; <span style="color:#dc3545;">Past cutoff — remaining chats shift to tomorrow</span>'
+                        : ' &mdash; <span>' + hoursLeft + 'h remaining</span>') +
+                    ' &nbsp;|&nbsp; Avg per chat: <span>' + avgMin + ' min</span>' +
+                    ' &nbsp;|&nbsp; Capacity: <span>' + data.max_chats_per_hour + ' chats/hr</span>';
+
+                const sorted = [...data.agents].sort((a, b) => b.workload_ratio - a.workload_ratio);
+
+                container.innerHTML = sorted.map(function(agent) {
+                    const barWidth = Math.min(100, Math.round(agent.workload_ratio * 100));
+                    const paceLabel = isPast ? '—' : (agent.required_pace + ' chats/hr needed');
+
+                    return '<div class="workload-card status-' + agent.status + '">' +
+                        '<div class="wl-header">' +
+                            '<span class="wl-agent">' + agent.agent_name + '</span>' +
+                            '<span class="wl-badge ' + agent.status + '">' + agent.status + '</span>' +
+                        '</div>' +
+                        '<div class="wl-stats">' +
+                            '<strong>' + agent.demand_count + '</strong> chats waiting<br>' +
+                            paceLabel + '<br>' +
+                            'Load: <strong>' + Math.round(agent.workload_ratio * 100) + '%</strong>' +
+                        '</div>' +
+                        '<div class="wl-bar"><div class="wl-bar-fill ' + agent.status + '" style="width:' + barWidth + '%"></div></div>' +
+                    '</div>';
+                }).join('');
+
+                refreshTime.textContent = '(updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ')';
+            } catch (err) {
+                console.error('Failed to load workload:', err);
+                container.innerHTML = '<div class="empty">Failed to load workload data.</div>';
+            }
+        }
+
+        // =====================
         // INIT
         // =====================
         setDefaultDate();
@@ -968,6 +1062,8 @@
             setInterval(loadActivityFeed, 5000);
             loadAgentDemand();
             setInterval(loadAgentDemand, 30000);
+            loadAgentWorkload();
+            setInterval(loadAgentWorkload, 30000);
         }
 
         if (isAgent) {
