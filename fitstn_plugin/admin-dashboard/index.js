@@ -610,10 +610,14 @@ app.get("/api/demand-history", requireAdmin, async (req, res) => {
         const { days } = req.query;
         const lookbackDays = Math.min(Math.max(parseInt(days) || 30, 1), 365);
 
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - lookbackDays);
+        const startDateStr = formatLocalDate(startDate);
+
         const rows = await sql`
             SELECT snapshot_date, agent_id, agent_name, demand_count
             FROM demand_snapshots
-            WHERE snapshot_date >= CURRENT_DATE - ${lookbackDays}
+            WHERE snapshot_date >= ${startDateStr}
             ORDER BY snapshot_date ASC, agent_name ASC
         `;
 
