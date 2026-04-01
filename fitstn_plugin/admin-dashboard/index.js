@@ -543,6 +543,87 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
     }
 });
 
+// =====================
+// DEMAND SNAPSHOTS
+// =====================
+async function takeDemandSnapshot() {
+    const agents = await sql`
+        SELECT id, name, fitstn_id
+        FROM agents
+        WHERE is_active = true AND fitstn_id IS NOT NULL AND fitstn_id != ''
+    `;
+
+    if (agents.length === 0) return { saved: 0, agents: [] };
+
+    await ensureSupabaseAuth();
+
+    const rpcParams = (overrides) => ({
+        p_assigned_staff_id: null, p_client_gender: null, p_coach_id: null,
+        p_ghost_days: null, p_ghost_only: false, p_last_interaction: null,
+        p_last_interaction_from: null, p_last_interaction_to: null,
+        p_last_message_from: "client", p_limit: 1, p_no_assigned_staff: false,
+        p_offset: 0, p_package_id: null, p_search: null, p_staff_id: null,
+        p_subscription_start_date: null, p_subscription_start_weekday: null,
+        p_subscription_status: null, p_subscription_t_status: null,
+        p_tenant_id: "fitstn", p_unread_only: false,
+        ...overrides,
+    });
+
+    const today = formatLocalDate(new Date());
+    const results = [];
+
+    for (const agent of agents) {
+        try {
+            const { data, error } = await supabase.rpc("get_chat_rooms_paginated", rpcParams({ p_assigned_staff_id: agent.fitstn_id }));
+            const demandCount = error ? 0 : (data?.total || 0);
+
+            await sql`
+                INSERT INTO demand_snapshots (snapshot_date, agent_id, agent_name, demand_count)
+                VALUES (${today}, ${agent.id}, ${agent.name}, ${demandCount})
+                ON CONFLICT (snapshot_date, agent_id)
+                DO UPDATE SET demand_count = ${demandCount}, agent_name = ${agent.name}, created_at = NOW()
+            `;
+
+            results.push({ agent_id: agent.id, agent_name: agent.name, demand_count: demandCount });
+        } catch (err) {
+            console.error(`Snapshot failed for ${agent.name}:`, err.message);
+            results.push({ agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: err.message });
+        }
+    }
+
+    return { saved: results.length, snapshot_date: today, agents: results };
+}
+
+app.post("/api/demand-snapshot", requireAdmin, async (req, res) => {
+    try {
+        const result = await takeDemandSnapshot();
+        res.json(result);
+    } catch (err) {
+        console.error("POST /api/demand-snapshot error:", err.message);
+        supabaseAuthenticated = false;
+        res.status(500).json({ error: "Failed to take demand snapshot", details: err.message });
+    }
+});
+
+app.get("/api/demand-history", requireAdmin, async (req, res) => {
+    try {
+        const { days } = req.query;
+        const lookbackDays = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+
+        const rows = await sql`
+            SELECT snapshot_date, agent_id, agent_name, demand_count
+            FROM demand_snapshots
+            WHERE snapshot_date >= CURRENT_DATE - ${lookbackDays}
+            ORDER BY snapshot_date ASC, agent_name ASC
+        `;
+
+        res.json({ days: lookbackDays, snapshots: rows });
+    } catch (err) {
+        console.error("GET /api/demand-history error:", err.message);
+        res.status(500).json({ error: "Failed to fetch demand history", details: err.message });
+    }
+});
+
 app.post("/api/chat-click", requireAgent, async (req, res) => {
     try {
         const { chatName, chatPreview } = req.body;
@@ -830,6 +911,19 @@ app.listen(PORT, async () => {
             ON CONFLICT (key) DO NOTHING
         `;
 
+        // Daily demand snapshots for historical tracking
+        await sql`
+            CREATE TABLE IF NOT EXISTS demand_snapshots (
+                id SERIAL PRIMARY KEY,
+                snapshot_date DATE NOT NULL,
+                agent_id INTEGER NOT NULL REFERENCES agents(id),
+                agent_name VARCHAR(255) NOT NULL,
+                demand_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(snapshot_date, agent_id)
+            )
+        `;
+
         // Agent salary definition
         await sql`
             CREATE TABLE IF NOT EXISTS agent_salaries (
@@ -976,6 +1070,24 @@ app.listen(PORT, async () => {
         // Start periodic shift auto-timeout check (every 5 minutes)
         const SHIFT_TIMEOUT_CHECK_MS = 5 * 60 * 1000;
         setInterval(checkShiftTimeouts, SHIFT_TIMEOUT_CHECK_MS);
+
+        // Daily demand snapshot — runs every hour, saves once per day
+        const SNAPSHOT_CHECK_MS = 60 * 60 * 1000;
+        setInterval(async () => {
+            try {
+                const today = formatLocalDate(new Date());
+                const existing = await sql`
+                    SELECT 1 FROM demand_snapshots WHERE snapshot_date = ${today} LIMIT 1
+                `;
+                if (existing.length === 0) {
+                    console.log("Taking daily demand snapshot...");
+                    const result = await takeDemandSnapshot();
+                    console.log(`Demand snapshot saved: ${result.saved} agents for ${result.snapshot_date}`);
+                }
+            } catch (err) {
+                console.error("Auto demand snapshot failed:", err.message);
+            }
+        }, SNAPSHOT_CHECK_MS);
 
         console.log("Database schema ready.");
     } catch (err) {

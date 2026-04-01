@@ -18,6 +18,10 @@ const sql = process.env.DATABASE_URL
         password: process.env.DATABASE_PASSWORD,
     });
 
+const STATUS_IN_SESSION = "in session";
+const STATUS_BETWEEN_SESSIONS = "between sessions";
+let agentStatus = STATUS_BETWEEN_SESSIONS;
+
 app.use(cors());
 app.use(express.json());
 app.use(express.text());
@@ -59,11 +63,16 @@ app.post("/api/chat-click", async (req, res) => {
             VALUES (${chatName || null}, ${chatPreview || null})
             RETURNING *
         `;
+        agentStatus = STATUS_IN_SESSION;
         res.json({ success: true, data: result[0] });
     } catch (err) {
         console.error("POST /api/chat-click error:", err.message);
         res.status(500).json({ error: "Failed to save chat click", details: err.message });
     }
+});
+
+app.get("/api/agent-status", (req, res) => {
+    res.json({ status: agentStatus });
 });
 
 app.post("/api/close-session", async (req, res) => {
@@ -73,7 +82,8 @@ app.post("/api/close-session", async (req, res) => {
             WHERE ended_at IS NULL
             RETURNING id
         `;
-        console.log("Tab closed - closed sessions:", updated.map(r => r.id));
+        console.log("Session closed:", updated.map(r => r.id));
+        agentStatus = STATUS_BETWEEN_SESSIONS;
         res.json({ success: true, closed: updated.length });
     } catch (err) {
         res.status(500).json({ error: "Failed to close session", details: err.message });
