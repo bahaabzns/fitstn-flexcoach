@@ -828,6 +828,11 @@ app.listen(PORT, async () => {
         // Add fitstn_id column to agents (links to Supabase staff UUID)
         await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS fitstn_id VARCHAR(100)`;
 
+        // Add working hours and SLA columns to agents
+        await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS shift_start_time TIME`;
+        await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS shift_end_time TIME`;
+        await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS sla_cutoff_time TIME`;
+
         // Seed default admin
         const existingAdmin = await sql`SELECT id FROM admins WHERE email = 'admin@fitstn.com'`;
         if (existingAdmin.length === 0) {
