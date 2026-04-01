@@ -614,7 +614,7 @@ async function takeDemandSnapshot() {
         p_assigned_staff_id: null, p_client_gender: null, p_coach_id: null,
         p_ghost_days: null, p_ghost_only: false, p_last_interaction: null,
         p_last_interaction_from: null, p_last_interaction_to: null,
-        p_last_message_from: "client", p_limit: 1, p_no_assigned_staff: false,
+        p_last_message_from: null, p_limit: 1, p_no_assigned_staff: false,
         p_offset: 0, p_package_id: null, p_search: null, p_staff_id: null,
         p_subscription_start_date: null, p_subscription_start_weekday: null,
         p_subscription_status: null, p_subscription_t_status: null,
@@ -1128,23 +1128,44 @@ app.listen(PORT, async () => {
         const SHIFT_TIMEOUT_CHECK_MS = 5 * 60 * 1000;
         setInterval(checkShiftTimeouts, SHIFT_TIMEOUT_CHECK_MS);
 
-        // Daily demand snapshot — runs every hour, saves once per day
-        const SNAPSHOT_CHECK_MS = 60 * 60 * 1000;
-        setInterval(async () => {
+        // Daily demand snapshot — scheduled at SLA cutoff time
+        async function scheduleDailySnapshot() {
             try {
-                const today = formatLocalDate(new Date());
-                const existing = await sql`
-                    SELECT 1 FROM demand_snapshots WHERE snapshot_date = ${today} LIMIT 1
-                `;
-                if (existing.length === 0) {
-                    console.log("Taking daily demand snapshot...");
-                    const result = await takeDemandSnapshot();
-                    console.log(`Demand snapshot saved: ${result.saved} agents for ${result.snapshot_date}`);
+                const cutoffRow = await sql`SELECT value FROM settings WHERE key = 'sla_cutoff_time'`;
+                const cutoffTime = (cutoffRow.length > 0 && cutoffRow[0].value) || '14:00';
+                const [cutoffHours, cutoffMinutes] = cutoffTime.split(':').map(Number);
+
+                const now = new Date();
+                const nextRun = new Date(now);
+                nextRun.setHours(cutoffHours, cutoffMinutes, 0, 0);
+
+                // If cutoff already passed today, schedule for tomorrow
+                if (nextRun <= now) {
+                    nextRun.setDate(nextRun.getDate() + 1);
                 }
+
+                const msUntilCutoff = nextRun - now;
+                const hoursUntil = Math.round(msUntilCutoff / 1000 / 60 / 60 * 10) / 10;
+                console.log(`Next demand snapshot scheduled at ${cutoffTime} (in ${hoursUntil}h)`);
+
+                setTimeout(async () => {
+                    try {
+                        console.log("Taking daily demand snapshot at SLA cutoff...");
+                        const result = await takeDemandSnapshot();
+                        console.log(`Demand snapshot saved: ${result.saved} agents for ${result.snapshot_date}`);
+                    } catch (err) {
+                        console.error("Auto demand snapshot failed:", err.message);
+                    }
+                    // Schedule next day's snapshot
+                    scheduleDailySnapshot();
+                }, msUntilCutoff);
             } catch (err) {
-                console.error("Auto demand snapshot failed:", err.message);
+                console.error("Failed to schedule demand snapshot:", err.message);
+                // Retry in 1 hour if scheduling fails
+                setTimeout(scheduleDailySnapshot, 60 * 60 * 1000);
             }
-        }, SNAPSHOT_CHECK_MS);
+        }
+        scheduleDailySnapshot();
 
         console.log("Database schema ready.");
     } catch (err) {
