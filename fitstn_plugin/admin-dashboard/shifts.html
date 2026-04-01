@@ -96,6 +96,9 @@
             <label for="filter-date">Date</label>
             <input type="date" id="filter-date" onchange="loadShifts()">
         </div>
+        <div class="field" style="align-self: flex-end;">
+            <button class="btn-save" onclick="openAddShiftModal()" style="padding: 8px 16px; font-size: 13px;">+ Add Shift</button>
+        </div>
     </div>
     <div id="period-label" class="period-label"></div>
     <table>
@@ -207,6 +210,97 @@
         document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);
         loadShifts();
         setInterval(loadShifts, 5000);
+
+        /* ───────── Add Shift Modal ───────── */
+
+        let cachedAgentList = null;
+
+        async function fetchAgentList() {
+            if (cachedAgentList) return cachedAgentList;
+            const res = await authFetch('/api/agents');
+            if (!res.ok) return [];
+            cachedAgentList = await res.json();
+            return cachedAgentList;
+        }
+
+        async function openAddShiftModal() {
+            const existing = document.getElementById('add-shift-modal');
+            if (existing) existing.remove();
+
+            const agents = await fetchAgentList();
+            const agentOptions = agents.map(a =>
+                `<option value="${a.id}">${a.name || a.email}</option>`
+            ).join('');
+
+            const overlay = document.createElement('div');
+            overlay.id = 'add-shift-modal';
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal-box">
+                    <h3>Add Shift</h3>
+                    <label for="add-agent">Agent *</label>
+                    <select id="add-agent" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:14px;box-sizing:border-box;">
+                        <option value="">Select agent...</option>
+                        ${agentOptions}
+                    </select>
+                    <label for="add-start">Started At *</label>
+                    <input type="datetime-local" id="add-start">
+                    <label for="add-end">Ended At (leave empty for active shift)</label>
+                    <input type="datetime-local" id="add-end">
+                    <label for="add-reason">Reason *</label>
+                    <textarea id="add-reason" placeholder="e.g. Agent worked offline, forgot to clock in"></textarea>
+                    <div id="add-error" class="modal-error"></div>
+                    <div class="modal-actions">
+                        <button class="btn-cancel" id="add-cancel">Cancel</button>
+                        <button class="btn-save" id="add-save">Add Shift</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            document.getElementById('add-cancel').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+            document.getElementById('add-save').addEventListener('click', async () => {
+                const agentId = document.getElementById('add-agent').value;
+                const startVal = document.getElementById('add-start').value;
+                const endVal = document.getElementById('add-end').value;
+                const reason = document.getElementById('add-reason').value.trim();
+                const errorEl = document.getElementById('add-error');
+                const saveBtn = document.getElementById('add-save');
+
+                if (!agentId) { errorEl.textContent = 'Please select an agent'; errorEl.style.display = 'block'; return; }
+                if (!startVal) { errorEl.textContent = 'Start time is required'; errorEl.style.display = 'block'; return; }
+                if (!reason || reason.length < 3) { errorEl.textContent = 'Reason is required (at least 3 characters)'; errorEl.style.display = 'block'; return; }
+
+                saveBtn.disabled = true;
+                errorEl.style.display = 'none';
+
+                try {
+                    const body = { agent_id: parseInt(agentId), shift_started_at: startVal, reason };
+                    if (endVal) body.shift_ended_at = endVal;
+
+                    const res = await authFetch('/api/shifts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        errorEl.textContent = data.error || 'Failed to create shift';
+                        errorEl.style.display = 'block';
+                        saveBtn.disabled = false;
+                        return;
+                    }
+                    overlay.remove();
+                    loadShifts();
+                } catch (err) {
+                    errorEl.textContent = 'Network error — check your connection';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = false;
+                }
+            });
+        }
 
         /* ───────── Edit Shift Modal ───────── */
 

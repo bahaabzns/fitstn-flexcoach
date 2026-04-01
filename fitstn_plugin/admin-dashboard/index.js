@@ -199,6 +199,59 @@ app.get("/api/shifts", requireAdmin, async (req, res) => {
     }
 });
 
+app.post("/api/shifts", requireAdmin, async (req, res) => {
+    try {
+        const { agent_id, shift_started_at, shift_ended_at, reason } = req.body;
+
+        if (!agent_id) {
+            return res.status(400).json({ error: "Agent is required" });
+        }
+        if (!shift_started_at) {
+            return res.status(400).json({ error: "Start time is required" });
+        }
+        if (!reason || reason.trim().length < 3) {
+            return res.status(400).json({ error: "Reason is required (at least 3 characters)" });
+        }
+
+        const agentExists = await sql`SELECT id FROM agents WHERE id = ${agent_id}`;
+        if (agentExists.length === 0) {
+            return res.status(404).json({ error: "Agent not found" });
+        }
+
+        const startDate = new Date(shift_started_at);
+        const endDate = shift_ended_at ? new Date(shift_ended_at) : null;
+        if (isNaN(startDate.getTime())) {
+            return res.status(400).json({ error: "Invalid start time" });
+        }
+        if (endDate && isNaN(endDate.getTime())) {
+            return res.status(400).json({ error: "Invalid end time" });
+        }
+        if (endDate && endDate <= startDate) {
+            return res.status(400).json({ error: "End time must be after start time" });
+        }
+
+        const result = await sql`
+            INSERT INTO shifts (agent_id, shift_started_at, shift_ended_at)
+            VALUES (${agent_id}, ${startDate.toISOString()}, ${endDate ? endDate.toISOString() : null})
+            RETURNING *
+        `;
+
+        const metadata = JSON.stringify({
+            reason: reason.trim(),
+            admin_id: req.user.id,
+            manual: true,
+        });
+        await sql`
+            INSERT INTO activity_events (agent_id, event_type, shift_id, metadata)
+            VALUES (${agent_id}, 'shift_added_manually', ${result[0].id}, ${metadata}::jsonb)
+        `;
+
+        res.status(201).json({ success: true, shift: result[0] });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to create shift", details: err.message });
+    }
+});
+
 app.put("/api/shifts/:id", requireAdmin, async (req, res) => {
     try {
         const shiftId = parseInt(req.params.id);
@@ -615,9 +668,9 @@ app.get("/api/demand-history", requireAdmin, async (req, res) => {
         const startDateStr = formatLocalDate(startDate);
 
         const rows = await sql`
-            SELECT snapshot_date, agent_id, agent_name, demand_count
+            SELECT snapshot_date::text, agent_id, agent_name, demand_count
             FROM demand_snapshots
-            WHERE snapshot_date >= ${startDateStr}
+            WHERE snapshot_date >= ${startDateStr}::date
             ORDER BY snapshot_date ASC, agent_name ASC
         `;
 
