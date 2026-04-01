@@ -23,6 +23,53 @@ async function ensureSupabaseAuth() {
     supabaseAuthenticated = true;
 }
 
+// Checks if a client's room is in the "waiting for agent" queue
+async function checkIfClientWaiting(chatName) {
+    const clientCodeMatch = (chatName || "").match(/#(\S+)/);
+    const clientCode = clientCodeMatch ? clientCodeMatch[1] : "";
+    if (!clientCode) return false;
+
+    try {
+        await ensureSupabaseAuth();
+
+        const { data, error } = await supabase.rpc("get_chat_rooms_paginated", {
+            p_assigned_staff_id: null,
+            p_client_gender: null,
+            p_coach_id: null,
+            p_ghost_days: null,
+            p_ghost_only: false,
+            p_last_interaction: null,
+            p_last_interaction_from: null,
+            p_last_interaction_to: null,
+            p_last_message_from: "client",
+            p_limit: 1,
+            p_no_assigned_staff: false,
+            p_offset: 0,
+            p_package_id: null,
+            p_search: clientCode,
+            p_staff_id: null,
+            p_subscription_start_date: null,
+            p_subscription_start_weekday: null,
+            p_subscription_status: null,
+            p_subscription_t_status: null,
+            p_tenant_id: "fitstn",
+            p_unread_only: false,
+        });
+
+        if (error) {
+            console.warn("checkIfClientWaiting Supabase error:", error.message);
+            return false;
+        }
+
+        const isWaiting = (data?.total || 0) > 0;
+        console.log(`Client ${clientCode} waiting: ${isWaiting}`);
+        return isWaiting;
+    } catch (err) {
+        console.warn("checkIfClientWaiting failed:", err.message);
+        return false;
+    }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -614,7 +661,7 @@ async function takeDemandSnapshot() {
         p_assigned_staff_id: null, p_client_gender: null, p_coach_id: null,
         p_ghost_days: null, p_ghost_only: false, p_last_interaction: null,
         p_last_interaction_from: null, p_last_interaction_to: null,
-        p_last_message_from: null, p_limit: 1, p_no_assigned_staff: false,
+        p_last_message_from: "client", p_limit: 1, p_no_assigned_staff: false,
         p_offset: 0, p_package_id: null, p_search: null, p_staff_id: null,
         p_subscription_start_date: null, p_subscription_start_weekday: null,
         p_subscription_status: null, p_subscription_t_status: null,
@@ -701,16 +748,19 @@ app.post("/api/chat-click", requireAgent, async (req, res) => {
             `;
         }
 
+        // Check if client was waiting (= client-initiated session)
+        const isClientInitiated = await checkIfClientWaiting(chatName);
+
         const result = await sql`
-            INSERT INTO sessions (chat_name, chat_preview, agent_id)
-            VALUES (${chatName || null}, ${chatPreview || null}, ${req.user.id})
+            INSERT INTO sessions (chat_name, chat_preview, agent_id, is_client_initiated)
+            VALUES (${chatName || null}, ${chatPreview || null}, ${req.user.id}, ${isClientInitiated})
             RETURNING *
         `;
 
         // Log session_started event
         await sql`
-            INSERT INTO activity_events (agent_id, event_type, session_id)
-            VALUES (${req.user.id}, 'session_started', ${result[0].id})
+            INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
+            VALUES (${req.user.id}, 'session_started', ${result[0].id}, ${JSON.stringify({ is_client_initiated: isClientInitiated })}::jsonb)
         `;
 
         res.json({ success: true, data: result[0] });
@@ -1128,44 +1178,23 @@ app.listen(PORT, async () => {
         const SHIFT_TIMEOUT_CHECK_MS = 5 * 60 * 1000;
         setInterval(checkShiftTimeouts, SHIFT_TIMEOUT_CHECK_MS);
 
-        // Daily demand snapshot — scheduled at SLA cutoff time
-        async function scheduleDailySnapshot() {
+        // Daily demand snapshot — runs every hour, saves once per day
+        const SNAPSHOT_CHECK_MS = 60 * 60 * 1000;
+        setInterval(async () => {
             try {
-                const cutoffRow = await sql`SELECT value FROM settings WHERE key = 'sla_cutoff_time'`;
-                const cutoffTime = (cutoffRow.length > 0 && cutoffRow[0].value) || '14:00';
-                const [cutoffHours, cutoffMinutes] = cutoffTime.split(':').map(Number);
-
-                const now = new Date();
-                const nextRun = new Date(now);
-                nextRun.setHours(cutoffHours, cutoffMinutes, 0, 0);
-
-                // If cutoff already passed today, schedule for tomorrow
-                if (nextRun <= now) {
-                    nextRun.setDate(nextRun.getDate() + 1);
+                const today = formatLocalDate(new Date());
+                const existing = await sql`
+                    SELECT 1 FROM demand_snapshots WHERE snapshot_date = ${today} LIMIT 1
+                `;
+                if (existing.length === 0) {
+                    console.log("Taking daily demand snapshot...");
+                    const result = await takeDemandSnapshot();
+                    console.log(`Demand snapshot saved: ${result.saved} agents for ${result.snapshot_date}`);
                 }
-
-                const msUntilCutoff = nextRun - now;
-                const hoursUntil = Math.round(msUntilCutoff / 1000 / 60 / 60 * 10) / 10;
-                console.log(`Next demand snapshot scheduled at ${cutoffTime} (in ${hoursUntil}h)`);
-
-                setTimeout(async () => {
-                    try {
-                        console.log("Taking daily demand snapshot at SLA cutoff...");
-                        const result = await takeDemandSnapshot();
-                        console.log(`Demand snapshot saved: ${result.saved} agents for ${result.snapshot_date}`);
-                    } catch (err) {
-                        console.error("Auto demand snapshot failed:", err.message);
-                    }
-                    // Schedule next day's snapshot
-                    scheduleDailySnapshot();
-                }, msUntilCutoff);
             } catch (err) {
-                console.error("Failed to schedule demand snapshot:", err.message);
-                // Retry in 1 hour if scheduling fails
-                setTimeout(scheduleDailySnapshot, 60 * 60 * 1000);
+                console.error("Auto demand snapshot failed:", err.message);
             }
-        }
-        scheduleDailySnapshot();
+        }, SNAPSHOT_CHECK_MS);
 
         console.log("Database schema ready.");
     } catch (err) {
