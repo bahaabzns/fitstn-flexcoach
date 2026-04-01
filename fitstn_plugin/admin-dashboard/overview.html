@@ -191,6 +191,22 @@
         .wl-bar-fill.overloaded { background: #dc3545; }
         .workload-summary { font-size: 14px; color: #555; margin-bottom: 12px; }
         .workload-summary span { font-weight: 600; }
+
+        /* Historical demand section */
+        .history-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .history-toolbar select, .history-toolbar button {
+            padding: 6px 12px; border-radius: 6px; border: 1px solid #ddd;
+            font-size: 13px; cursor: pointer;
+        }
+        .history-toolbar button { background: #007bff; color: #fff; border: none; font-weight: 600; }
+        .history-toolbar button:hover { background: #0056b3; }
+        .history-toolbar button.snapshot-btn { background: #28a745; }
+        .history-toolbar button.snapshot-btn:hover { background: #1e7e34; }
+        .history-chart-box {
+            background: #fff; border-radius: 8px; padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 100%;
+        }
+        .history-chart-box canvas { max-height: 320px; }
     </style>
 </head>
 <body>
@@ -234,6 +250,25 @@
             <div id="workload-container" class="workload-grid">
                 <div class="empty">Loading workload...</div>
             </div>
+        </div>
+
+        <!-- Historical Demand Section -->
+        <div id="history-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 8px;">Historical Demand <span id="history-refresh-time" style="font-size:12px; color:#999; font-weight:normal;"></span></h2>
+            <div class="history-toolbar">
+                <select id="history-days" onchange="loadDemandHistory()">
+                    <option value="7">Last 7 days</option>
+                    <option value="14">Last 14 days</option>
+                    <option value="30" selected>Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                </select>
+                <button class="snapshot-btn" onclick="takeDemandSnapshot()">Take Snapshot Now</button>
+                <span id="snapshot-status" style="font-size:12px; color:#555;"></span>
+            </div>
+            <div class="history-chart-box">
+                <canvas id="demandHistoryChart"></canvas>
+            </div>
+            <div id="history-empty" class="empty" style="display:none;">No historical data yet. Take a snapshot to start tracking.</div>
         </div>
 
         <!-- Live Activity Feed -->
@@ -1049,6 +1084,119 @@
         }
 
         // =====================
+        // HISTORICAL DEMAND
+        // =====================
+        let demandHistoryChart = null;
+        const HISTORY_LINE_COLORS = ['#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1', '#20c997', '#e83e8c', '#17a2b8'];
+
+        async function loadDemandHistory() {
+            if (!isAdmin) return;
+            const days = document.getElementById('history-days').value;
+            const refreshTime = document.getElementById('history-refresh-time');
+            const emptyMsg = document.getElementById('history-empty');
+            const chartBox = document.querySelector('.history-chart-box');
+            try {
+                const res = await authFetch('/api/demand-history?days=' + days);
+                const data = await res.json();
+
+                if (!data.snapshots || data.snapshots.length === 0) {
+                    emptyMsg.style.display = 'block';
+                    chartBox.style.display = 'none';
+                    if (demandHistoryChart) { demandHistoryChart.destroy(); demandHistoryChart = null; }
+                    refreshTime.textContent = '';
+                    return;
+                }
+
+                emptyMsg.style.display = 'none';
+                chartBox.style.display = 'block';
+
+                // Group by date and agent
+                const dateSet = new Set();
+                const agentMap = {};
+                for (const row of data.snapshots) {
+                    const dateLabel = row.snapshot_date.slice(0, 10);
+                    dateSet.add(dateLabel);
+                    if (!agentMap[row.agent_name]) agentMap[row.agent_name] = {};
+                    agentMap[row.agent_name][dateLabel] = row.demand_count;
+                }
+
+                const dates = Array.from(dateSet).sort();
+                const agentNames = Object.keys(agentMap).sort();
+
+                const datasets = agentNames.map(function(name, index) {
+                    return {
+                        label: name,
+                        data: dates.map(function(d) { return agentMap[name][d] || 0; }),
+                        borderColor: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length],
+                        backgroundColor: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length] + '22',
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 3,
+                    };
+                });
+
+                // Add total line
+                datasets.push({
+                    label: 'Total',
+                    data: dates.map(function(d) {
+                        return agentNames.reduce(function(sum, name) { return sum + (agentMap[name][d] || 0); }, 0);
+                    }),
+                    borderColor: '#333',
+                    borderDash: [6, 3],
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                });
+
+                if (demandHistoryChart) demandHistoryChart.destroy();
+
+                demandHistoryChart = new Chart(document.getElementById('demandHistoryChart'), {
+                    type: 'line',
+                    data: { labels: dates, datasets: datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top', labels: { boxWidth: 12, font: { size: 12 } } },
+                            tooltip: { mode: 'index', intersect: false },
+                        },
+                        scales: {
+                            x: { ticks: { font: { size: 11 } } },
+                            y: { beginAtZero: true, title: { display: true, text: 'Waiting Chats' } },
+                        },
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                    },
+                });
+
+                refreshTime.textContent = '(updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ')';
+            } catch (err) {
+                console.error('Failed to load demand history:', err);
+                emptyMsg.style.display = 'block';
+                emptyMsg.textContent = 'Failed to load historical data.';
+                chartBox.style.display = 'none';
+            }
+        }
+
+        async function takeDemandSnapshot() {
+            const statusEl = document.getElementById('snapshot-status');
+            statusEl.textContent = 'Taking snapshot...';
+            statusEl.style.color = '#555';
+            try {
+                const res = await authFetch('/api/demand-snapshot', { method: 'POST' });
+                const data = await res.json();
+                statusEl.textContent = 'Saved ' + data.saved + ' agents for ' + data.snapshot_date;
+                statusEl.style.color = '#28a745';
+                loadDemandHistory();
+            } catch (err) {
+                console.error('Snapshot failed:', err);
+                statusEl.textContent = 'Snapshot failed — check console';
+                statusEl.style.color = '#dc3545';
+            }
+        }
+
+        // =====================
         // INIT
         // =====================
         setDefaultDate();
@@ -1064,6 +1212,7 @@
             setInterval(loadAgentDemand, 30000);
             loadAgentWorkload();
             setInterval(loadAgentWorkload, 30000);
+            loadDemandHistory();
         }
 
         if (isAgent) {
