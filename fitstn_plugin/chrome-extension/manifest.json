@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "FlexCoach Chat Handler",
+  "version": "1.1",
+  "description": "Adds click handlers to chats on FlexCoach dashboard",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["https://fitstn-flexcoach.onrender.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FlexCoach Agent"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://fitstn.flexcoach.app/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Shifts</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #333; color: #fff; }
+        tr:hover { background: #f9f9f9; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: bold; }
+        .badge-active { background: #d4edda; color: #155724; }
+        .badge-ended { background: #e2e3e5; color: #383d41; }
+
+        .btn-edit { padding: 4px 10px; border: 1px solid #6c757d; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; color: #333; }
+        .btn-edit:hover { background: #f0f0f0; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; display: flex; align-items: center; justify-content: center; }
+        .modal-box { background: #fff; border-radius: 12px; padding: 24px 28px; box-shadow: 0 8px 30px rgba(0,0,0,0.2); max-width: 440px; width: 90%; }
+        .modal-box h3 { margin: 0 0 16px; font-size: 18px; color: #333; }
+        .modal-box label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; margin-top: 12px; }
+        .modal-box input, .modal-box textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+        .modal-box textarea { resize: vertical; min-height: 60px; }
+        .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+        .modal-actions button { padding: 8px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .btn-cancel { border: 1px solid #ddd; background: #fff; color: #333; }
+        .btn-save { border: none; background: #333; color: #fff; }
+        .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+        .modal-error { color: #dc3545; font-size: 13px; margin-top: 8px; display: none; }
+
+        .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+        .toolbar .field { min-width: 160px; }
+        .toolbar label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .toolbar input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 150px; }
+        .period-toggle { display: flex; gap: 0; }
+        .period-toggle button {
+            padding: 8px 16px; border: 1px solid #ddd; background: #fff; cursor: pointer;
+            font-size: 13px; font-weight: 500; color: #555;
+        }
+        .period-toggle button:first-child { border-radius: 4px 0 0 4px; }
+        .period-toggle button:last-child { border-radius: 0 4px 4px 0; }
+        .period-toggle button.active { background: #333; color: #fff; border-color: #333; }
+        .period-label { font-size: 13px; color: #777; margin-bottom: 12px; }
+
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #28a745;
+            border-radius: 50%;
+            margin-left: 10px;
+            vertical-align: middle;
+            animation: livePulse 5s ease-in-out infinite;
+        }
+        @keyframes livePulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+            10% { transform: scale(1.5); box-shadow: 0 0 12px 5px rgba(40, 167, 69, 0.5); }
+            20% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Admin Dashboard<span class="live-indicator"></span></h1>
+        <div>
+            <nav style="display:inline;">
+                <a href="/overview.html">Overview</a>
+                <a href="/dashboard.html">Sessions</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html" class="active">Shifts</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/staff-assignator.html">Assignator</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+    <div class="toolbar">
+        <div class="field">
+            <label>Period</label>
+            <div class="period-toggle" id="period-toggle">
+                <button onclick="setPeriod('day')" data-period="day">Day</button>
+                <button onclick="setPeriod('week')" data-period="week">Week</button>
+                <button onclick="setPeriod('month')" data-period="month" class="active">Month</button>
+            </div>
+        </div>
+        <div class="field">
+            <label for="filter-date">Date</label>
+            <input type="date" id="filter-date" onchange="loadShifts()">
+        </div>
+        <div class="field" style="align-self: flex-end;">
+            <button class="btn-save" onclick="openAddShiftModal()" style="padding: 8px 16px; font-size: 13px;">+ Add Shift</button>
+        </div>
+    </div>
+    <div id="period-label" class="period-label"></div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Agent</th>
+                <th>Started At</th>
+                <th>Ended At</th>
+                <th>Duration</th>
+                <th>Break</th>
+                <th>Between Sessions</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="shifts-body">
+            <tr><td colspan="9" class="empty">Loading...</td></tr>
+        </tbody>
+    </table>
+    <script>
+        // Arabic date utilities
+        const ARABIC_MONTH_NAMES = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+        const ARABIC_DAY_NAMES = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+        function getArabicPeriod(h) { return h < 12 ? 'صباحاً' : 'مساءً'; }
+        function formatArabicTime(date) { const h = date.getHours(); return `${h % 12 || 12}:${String(date.getMinutes()).padStart(2,'0')} ${getArabicPeriod(h)}`; }
+        function formatArabicDateNoDay(date) { return `${date.getDate()} ${ARABIC_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`; }
+        function formatArabicDateTime(date) { return `${ARABIC_DAY_NAMES[date.getDay()]} ${date.getDate()} ${ARABIC_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()} - الساعة ${formatArabicTime(date)}`; }
+
+        const token = localStorage.getItem('adminToken');
+        if (!token) { window.location.href = '/'; }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) { localStorage.removeItem('adminToken'); window.location.href = '/'; }
+                return res;
+            });
+        }
+
+        function logout() {
+            authFetch('/api/admin/logout', { method: 'POST' });
+            localStorage.removeItem('adminToken');
+            window.location.href = '/';
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (mins < 60) return mins + 'm ' + secs + 's';
+            const hours = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hours + 'h ' + remMins + 'm';
+        }
+
+        let currentPeriod = 'month';
+
+        function setPeriod(period) {
+            currentPeriod = period;
+            document.querySelectorAll('#period-toggle button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === period);
+            });
+            loadShifts();
+        }
+
+        function renderPeriodLabel(period) {
+            const start = new Date(period.start + 'T00:00:00');
+            const end = new Date(period.end + 'T00:00:00');
+            const label = period.type === 'day'
+                ? formatArabicDateNoDay(start)
+                : formatArabicDateNoDay(start) + ' — ' + formatArabicDateNoDay(end);
+            document.getElementById('period-label').textContent = label;
+        }
+
+        async function loadShifts() {
+            const tbody = document.getElementById("shifts-body");
+            const date = document.getElementById('filter-date').value;
+            if (!date) return;
+            try {
+                const res = await authFetch(`/api/shifts?period=${currentPeriod}&date=${date}`);
+                const response = await res.json();
+                renderPeriodLabel(response.period);
+                const data = response.shifts;
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="empty">No shifts for this period.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.map(row => {
+                    const isActive = !row.shift_ended_at;
+                    const duration = isActive
+                        ? formatDuration(Math.round((Date.now() - new Date(row.shift_started_at).getTime()) / 1000))
+                        : formatDuration(row.duration_seconds);
+                    const breakDuration = row.break_seconds != null ? formatDuration(row.break_seconds) : '-';
+                    const idleDuration = row.idle_seconds != null ? formatDuration(row.idle_seconds) : '-';
+                    const startedIso = new Date(row.shift_started_at).toISOString().slice(0, 16);
+                    const endedIso = row.shift_ended_at ? new Date(row.shift_ended_at).toISOString().slice(0, 16) : '';
+                    return `
+                        <tr>
+                            <td>${row.id}</td>
+                            <td>${row.agent_name || row.agent_email || "-"}</td>
+                            <td>${formatArabicDateTime(new Date(row.shift_started_at))}</td>
+                            <td>${isActive ? "-" : formatArabicDateTime(new Date(row.shift_ended_at))}</td>
+                            <td>${duration}</td>
+                            <td>${breakDuration}</td>
+                            <td>${idleDuration}</td>
+                            <td><span class="badge ${isActive ? 'badge-active' : 'badge-ended'}">${isActive ? 'Active' : 'Ended'}</span></td>
+                            <td><button class="btn-edit" onclick="openEditModal(${row.id}, '${startedIso}', '${endedIso}')">Edit</button></td>
+                        </tr>
+                    `;
+                }).join("");
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty">Failed to load shifts.</td></tr>';
+            }
+        }
+        document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);
+        loadShifts();
+        setInterval(loadShifts, 5000);
+
+        /* ───────── Add Shift Modal ───────── */
+
+        let cachedAgentList = null;
+
+        async function fetchAgentList() {
+            if (cachedAgentList) return cachedAgentList;
+            const res = await authFetch('/api/agents');
+            if (!res.ok) return [];
+            cachedAgentList = await res.json();
+            return cachedAgentList;
+        }
+
+        async function openAddShiftModal() {
+            const existing = document.getElementById('add-shift-modal');
+            if (existing) existing.remove();
+
+            const agents = await fetchAgentList();
+            const agentOptions = agents.map(a =>
+                `<option value="${a.id}">${a.name || a.email}</option>`
+            ).join('');
+
+            const overlay = document.createElement('div');
+            overlay.id = 'add-shift-modal';
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal-box">
+                    <h3>Add Shift</h3>
+                    <label for="add-agent">Agent *</label>
+                    <select id="add-agent" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:14px;box-sizing:border-box;">
+                        <option value="">Select agent...</option>
+                        ${agentOptions}
+                    </select>
+                    <label for="add-start">Started At *</label>
+                    <input type="datetime-local" id="add-start">
+                    <label for="add-end">Ended At (leave empty for active shift)</label>
+                    <input type="datetime-local" id="add-end">
+                    <label for="add-reason">Reason *</label>
+                    <textarea id="add-reason" placeholder="e.g. Agent worked offline, forgot to clock in"></textarea>
+                    <div id="add-error" class="modal-error"></div>
+                    <div class="modal-actions">
+                        <button class="btn-cancel" id="add-cancel">Cancel</button>
+                        <button class="btn-save" id="add-save">Add Shift</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            document.getElementById('add-cancel').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+            document.getElementById('add-save').addEventListener('click', async () => {
+                const agentId = document.getElementById('add-agent').value;
+                const startVal = document.getElementById('add-start').value;
+                const endVal = document.getElementById('add-end').value;
+                const reason = document.getElementById('add-reason').value.trim();
+                const errorEl = document.getElementById('add-error');
+                const saveBtn = document.getElementById('add-save');
+
+                if (!agentId) { errorEl.textContent = 'Please select an agent'; errorEl.style.display = 'block'; return; }
+                if (!startVal) { errorEl.textContent = 'Start time is required'; errorEl.style.display = 'block'; return; }
+                if (!reason || reason.length < 3) { errorEl.textContent = 'Reason is required (at least 3 characters)'; errorEl.style.display = 'block'; return; }
+
+                saveBtn.disabled = true;
+                errorEl.style.display = 'none';
+
+                try {
+                    const body = { agent_id: parseInt(agentId), shift_started_at: startVal, reason };
+                    if (endVal) body.shift_ended_at = endVal;
+
+                    const res = await authFetch('/api/shifts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        errorEl.textContent = data.error || 'Failed to create shift';
+                        errorEl.style.display = 'block';
+                        saveBtn.disabled = false;
+                        return;
+                    }
+                    overlay.remove();
+                    loadShifts();
+                } catch (err) {
+                    errorEl.textContent = 'Network error — check your connection';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = false;
+                }
+            });
+        }
+
+        /* ───────── Edit Shift Modal ───────── */
+
+        function openEditModal(shiftId, startedAt, endedAt) {
+            const existing = document.getElementById('edit-shift-modal');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'edit-shift-modal';
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal-box">
+                    <h3>Edit Shift #${shiftId}</h3>
+                    <label for="edit-start">Started At</label>
+                    <input type="datetime-local" id="edit-start" value="${startedAt}">
+                    <label for="edit-end">Ended At (leave empty for active shift)</label>
+                    <input type="datetime-local" id="edit-end" value="${endedAt}">
+                    <label for="edit-reason">Reason for adjustment *</label>
+                    <textarea id="edit-reason" placeholder="e.g. Agent forgot to clock out"></textarea>
+                    <div id="edit-error" class="modal-error"></div>
+                    <div class="modal-actions">
+                        <button class="btn-cancel" id="edit-cancel">Cancel</button>
+                        <button class="btn-save" id="edit-save">Save</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            document.getElementById('edit-cancel').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+            document.getElementById('edit-save').addEventListener('click', async () => {
+                const startVal = document.getElementById('edit-start').value;
+                const endVal = document.getElementById('edit-end').value;
+                const reason = document.getElementById('edit-reason').value.trim();
+                const errorEl = document.getElementById('edit-error');
+                const saveBtn = document.getElementById('edit-save');
+
+                if (!startVal) { errorEl.textContent = 'Start time is required'; errorEl.style.display = 'block'; return; }
+                if (!reason || reason.length < 3) { errorEl.textContent = 'Reason is required (at least 3 characters)'; errorEl.style.display = 'block'; return; }
+
+                saveBtn.disabled = true;
+                errorEl.style.display = 'none';
+
+                try {
+                    const body = { shift_started_at: startVal, reason };
+                    if (endVal) body.shift_ended_at = endVal;
+
+                    const res = await authFetch('/api/shifts/' + shiftId, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        errorEl.textContent = data.error || 'Failed to update shift';
+                        errorEl.style.display = 'block';
+                        saveBtn.disabled = false;
+                        return;
+                    }
+                    overlay.remove();
+                    loadShifts();
+                } catch (err) {
+                    errorEl.textContent = 'Network error — check your connection';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = false;
+                }
+            });
+        }
+    </script>
+</body>
+</html>

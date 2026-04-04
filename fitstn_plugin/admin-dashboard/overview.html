@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Overview</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        h2 { color: #333; margin: 0 0 16px 0; font-size: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .hidden { display: none; }
+
+        /* Live agent cards */
+        .cards-grid { display: flex; flex-wrap: wrap; gap: 16px; }
+        .agent-card {
+            background: #fff; border-radius: 8px; padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            min-width: 260px; flex: 1 1 280px; max-width: 400px;
+            border-left: 4px solid #ccc;
+        }
+        .agent-card.status-active { border-left-color: #28a745; }
+        .agent-card.status-idle { border-left-color: #ffc107; }
+        .agent-card.status-on_break { border-left-color: #6366f1; background: #f0f0ff; }
+        .agent-card.idle-warning { border-left-color: #fd7e14; background: #fff8f0; }
+        .agent-card.idle-critical { border-left-color: #dc3545; background: #fff5f5; animation: pulse 2s infinite; }
+        .agent-card.session-exceeded { border-left-color: #dc3545; background: #fff5f5; animation: pulse 2s infinite; }
+        .agent-card.status-off_shift { border-left-color: #6c757d; }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            50% { box-shadow: 0 0 12px rgba(220,53,69,0.4); }
+        }
+
+        .idle-alert-banner {
+            color: #fff; padding: 10px 16px; border-radius: 6px;
+            margin-bottom: 16px; font-size: 14px; font-weight: 500; display: none;
+        }
+        .idle-alert-banner.warning { background: #fd7e14; }
+        .idle-alert-banner.critical { background: #dc3545; }
+
+        .status-badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: bold; color: #fff; text-transform: uppercase; }
+        .status-badge.active { background: #28a745; }
+        .status-badge.idle { background: #ffc107; color: #333; }
+        .status-badge.off_shift { background: #6c757d; }
+        .status-badge.idle-warning { background: #fd7e14; color: #fff; }
+        .status-badge.idle-critical { background: #dc3545; color: #fff; }
+        .status-badge.session-exceeded { background: #dc3545; color: #fff; }
+        .session-exceeded-text { color: #dc3545; font-weight: bold; }
+
+        .agent-name { font-size: 18px; font-weight: bold; color: #333; margin: 0; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .card-detail { font-size: 13px; color: #666; margin: 4px 0; }
+        .card-detail strong { color: #333; }
+
+        /* Agent overview section */
+        .section-divider { border: none; border-top: 2px solid #ddd; margin: 32px 0; }
+
+        .overview-toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+        .overview-toolbar .field { min-width: 180px; }
+        .overview-toolbar label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .overview-toolbar select,
+        .overview-toolbar input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 160px; }
+
+        .period-toggle { display: flex; gap: 0; }
+        .period-toggle button {
+            padding: 8px 16px; border: 1px solid #ddd; background: #fff; cursor: pointer;
+            font-size: 13px; font-weight: 500; color: #555;
+        }
+        .period-toggle button:first-child { border-radius: 4px 0 0 4px; }
+        .period-toggle button:last-child { border-radius: 0 4px 4px 0; }
+        .period-toggle button.active { background: #333; color: #fff; border-color: #333; }
+
+        .summary-cards { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+        .summary-card {
+            background: #fff; padding: 16px 24px; border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center;
+            min-width: 130px; flex: 1 1 140px;
+        }
+        .summary-card .label { font-size: 12px; color: #777; margin-bottom: 4px; }
+        .summary-card .value { font-size: 22px; font-weight: bold; color: #333; }
+        .summary-card.green .value { color: #28a745; }
+        .summary-card.red .value { color: #dc3545; }
+        .summary-card.blue .value { color: #007bff; }
+
+        .charts-row { display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; }
+        .chart-box {
+            background: #fff; padding: 20px; border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex: 1 1 400px; min-width: 320px;
+        }
+        .chart-box h3 { margin: 0 0 12px 0; font-size: 15px; color: #333; }
+
+        .period-label { font-size: 13px; color: #777; margin-bottom: 16px; }
+
+        /* Activity feed */
+        .feed-container {
+            max-height: 300px; overflow-y: auto; background: #fff;
+            border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 12px; margin-top: 20px;
+        }
+        .feed-entry {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 8px 10px; border-left: 3px solid #ccc; margin-bottom: 6px;
+            font-size: 13px; color: #444; border-radius: 0 4px 4px 0;
+            background: #fafafa;
+        }
+        .feed-entry .feed-time { color: #999; font-size: 11px; white-space: nowrap; min-width: 55px; }
+        .feed-entry .feed-agent { font-weight: 600; color: #333; }
+        .feed-entry.type-session_started { border-left-color: #28a745; }
+        .feed-entry.type-session_ended { border-left-color: #6c757d; }
+        .feed-entry.type-message_sent { border-left-color: #007bff; }
+        .feed-entry.type-idle_started { border-left-color: #ffc107; }
+        .feed-entry.type-idle_resumed { border-left-color: #28a745; }
+        .feed-entry.type-shift_started { border-left-color: #28a745; }
+        .feed-entry.type-shift_ended { border-left-color: #6c757d; }
+        .feed-entry.type-tab_focus_lost { border-left-color: #fd7e14; }
+        .feed-entry.type-tab_focus_gained { border-left-color: #17a2b8; }
+        .feed-entry.type-auto_timeout { border-left-color: #dc3545; background: #fff5f5; }
+
+        /* Agent nav */
+        .agent-nav { margin-bottom: 20px; }
+        .agent-nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        .agent-nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #28a745;
+            border-radius: 50%;
+            margin-left: 10px;
+            vertical-align: middle;
+            animation: livePulse 5s ease-in-out infinite;
+        }
+        @keyframes livePulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+            10% { transform: scale(1.5); box-shadow: 0 0 12px 5px rgba(40, 167, 69, 0.5); }
+            20% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+        /* Demand section */
+        .demand-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+        .demand-card {
+            background: #fff; border-radius: 8px; padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            min-width: 180px; flex: 1 1 200px; max-width: 280px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-left: 4px solid #007bff;
+        }
+        .demand-card .demand-agent { font-weight: 600; color: #333; font-size: 14px; }
+        .demand-card .demand-count { font-size: 22px; font-weight: bold; color: #007bff; }
+        .demand-card.high-demand { border-left-color: #dc3545; }
+        .demand-card.high-demand .demand-count { color: #dc3545; }
+        .demand-card.medium-demand { border-left-color: #fd7e14; }
+        .demand-card.medium-demand .demand-count { color: #fd7e14; }
+        .demand-card.no-demand { border-left-color: #28a745; }
+        .demand-card.no-demand .demand-count { color: #28a745; }
+        .demand-card.unassigned { border-left-color: #6c757d; background: #f8f8f8; }
+        .demand-card.unassigned .demand-count { color: #6c757d; }
+        .demand-total { font-size: 14px; color: #555; margin-bottom: 12px; }
+
+        /* Workload section */
+        .workload-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+        .workload-card {
+            background: #fff; border-radius: 8px; padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            min-width: 220px; flex: 1 1 240px; max-width: 320px;
+            border-left: 4px solid #28a745;
+        }
+        .workload-card.status-busy { border-left-color: #fd7e14; }
+        .workload-card.status-overloaded { border-left-color: #dc3545; }
+        .workload-card .wl-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .workload-card .wl-agent { font-weight: 600; color: #333; font-size: 14px; }
+        .workload-card .wl-badge {
+            font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase;
+        }
+        .wl-badge.comfortable { background: #d4edda; color: #155724; }
+        .wl-badge.busy { background: #fff3cd; color: #856404; }
+        .wl-badge.overloaded { background: #f8d7da; color: #721c24; }
+        .workload-card .wl-stats { font-size: 13px; color: #555; line-height: 1.7; }
+        .workload-card .wl-stats strong { color: #333; }
+        .workload-card .wl-bar { height: 6px; background: #e9ecef; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .workload-card .wl-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+        .wl-bar-fill.comfortable { background: #28a745; }
+        .wl-bar-fill.busy { background: #fd7e14; }
+        .wl-bar-fill.overloaded { background: #dc3545; }
+        .workload-summary { font-size: 14px; color: #555; margin-bottom: 12px; }
+        .workload-summary span { font-weight: 600; }
+
+        /* Historical demand section */
+        .history-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .history-toolbar select, .history-toolbar button {
+            padding: 6px 12px; border-radius: 6px; border: 1px solid #ddd;
+            font-size: 13px; cursor: pointer;
+        }
+        .history-toolbar button { background: #007bff; color: #fff; border: none; font-weight: 600; }
+        .history-toolbar button:hover { background: #0056b3; }
+        .history-toolbar button.snapshot-btn { background: #28a745; }
+        .history-toolbar button.snapshot-btn:hover { background: #1e7e34; }
+        .history-chart-box {
+            background: #fff; border-radius: 8px; padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 100%;
+        }
+        .history-chart-box canvas { height: 300px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 id="page-title">Dashboard<span class="live-indicator"></span></h1>
+        <div id="header-right">
+            <nav id="admin-nav" style="display:inline;">
+                <a href="/overview.html" class="active">Overview</a>
+                <a href="/dashboard.html">Sessions</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/staff-assignator.html">Assignator</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <!-- Live agent status (admin only) -->
+    <div id="live-section">
+        <div id="session-alert" class="idle-alert-banner"></div>
+        <div id="idle-alert" class="idle-alert-banner"></div>
+        <div id="cards-container" class="cards-grid">
+            <div class="empty">Loading...</div>
+        </div>
+
+        <!-- Agent Demand Section -->
+        <div id="demand-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 8px;">Agent Demand <span id="demand-refresh-time" style="font-size:12px; color:#999; font-weight:normal;"></span></h2>
+            <div id="demand-total" class="demand-total"></div>
+            <div id="demand-container" class="demand-grid">
+                <div class="empty">Loading demand...</div>
+            </div>
+        </div>
+
+        <!-- Agent Workload Section -->
+        <div id="workload-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 8px;">Agent Workload <span id="workload-refresh-time" style="font-size:12px; color:#999; font-weight:normal;"></span></h2>
+            <div id="workload-summary" class="workload-summary"></div>
+            <div id="workload-container" class="workload-grid">
+                <div class="empty">Loading workload...</div>
+            </div>
+        </div>
+
+        <!-- Historical Demand Section -->
+        <div id="history-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 8px;">Historical Demand <span id="history-refresh-time" style="font-size:12px; color:#999; font-weight:normal;"></span></h2>
+            <div class="history-toolbar">
+                <select id="history-days" onchange="loadDemandHistory()">
+                    <option value="7">Last 7 days</option>
+                    <option value="14">Last 14 days</option>
+                    <option value="30" selected>Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                </select>
+                <button class="snapshot-btn" onclick="takeDemandSnapshot()">Take Snapshot Now</button>
+                <span id="snapshot-status" style="font-size:12px; color:#555;"></span>
+            </div>
+            <div class="history-chart-box">
+                <canvas id="demandHistoryChart"></canvas>
+            </div>
+            <div id="history-empty" class="empty" style="display:none;">No historical data yet. Take a snapshot to start tracking.</div>
+        </div>
+
+        <!-- Live Activity Feed -->
+        <div id="activity-feed-section" style="margin-top: 24px;">
+            <h2 style="font-size: 18px; color: #333; margin-bottom: 12px;">Live Activity Feed</h2>
+            <div id="activity-feed" class="feed-container">
+                <div class="empty">Waiting for activity...</div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="section-divider">
+
+    <!-- Agent sub-navigation (agent only) -->
+    <nav id="agent-nav" class="agent-nav hidden">
+        <a href="/overview.html" class="active">Overview</a>
+        <a href="/agent-sessions.html">Sessions</a>
+        <a href="/agent-shifts.html">Shifts</a>
+    </nav>
+
+    <!-- Agent overview section (admin + agent) -->
+    <div id="agent-overview-section">
+        <h2>Agent Performance & Salary</h2>
+        <div class="overview-toolbar">
+            <div class="field" id="agent-picker-field">
+                <label for="ov-agent-select">Agent</label>
+                <select id="ov-agent-select" onchange="loadAgentOverview()">
+                    <option value="">-- Select agent --</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>Period</label>
+                <div class="period-toggle" id="period-toggle">
+                    <button onclick="setPeriod('day')" data-period="day">Day</button>
+                    <button onclick="setPeriod('week')" data-period="week">Week</button>
+                    <button onclick="setPeriod('month')" data-period="month" class="active">Month</button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="ov-date">Date</label>
+                <input type="date" id="ov-date" onchange="loadAgentOverview()">
+            </div>
+        </div>
+
+        <div id="ov-period-label" class="period-label"></div>
+
+        <div id="ov-content" class="hidden">
+            <!-- Salary cards -->
+            <div id="salary-section">
+                <h3 style="font-size:16px; color:#333; margin-bottom:12px;">Salary Overview <span id="salary-month-label" style="font-size:13px; color:#777; font-weight:normal;"></span></h3>
+                <div class="summary-cards" id="salary-cards"></div>
+            </div>
+
+            <!-- Performance cards -->
+            <h3 style="font-size:16px; color:#333; margin-bottom:12px;">Performance</h3>
+            <div class="summary-cards" id="performance-cards"></div>
+
+            <!-- Charts -->
+            <div class="charts-row">
+                <div class="chart-box">
+                    <h3>Daily Sessions</h3>
+                    <canvas id="sessionsChart"></canvas>
+                </div>
+                <div class="chart-box">
+                    <h3>Daily Active vs Idle Hours</h3>
+                    <canvas id="activityChart"></canvas>
+                </div>
+            </div>
+            <div class="charts-row">
+                <div class="chart-box">
+                    <h3>Productivity % by Day</h3>
+                    <canvas id="productivityChart"></canvas>
+                </div>
+                <div class="chart-box" id="salary-history-box">
+                    <h3>Salary History</h3>
+                    <canvas id="salaryHistoryChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+
+        <div id="ov-empty" class="empty">Select an agent to view their overview.</div>
+    </div>
+
+    <script>
+        // =====================
+        // ARABIC DATE UTILITIES
+        // =====================
+        const ARABIC_MONTH_NAMES = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+        function formatArabicShortDate(date) { return `${date.getDate()} ${ARABIC_MONTH_NAMES[date.getMonth()]}`; }
+        function formatArabicDateNoDay(date) { return `${date.getDate()} ${ARABIC_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`; }
+        function getArabicPeriod(h) { return h < 12 ? 'صباحاً' : 'مساءً'; }
+        function formatArabicTime(date) { const h = date.getHours(); return `${h % 12 || 12}:${String(date.getMinutes()).padStart(2,'0')} ${getArabicPeriod(h)}`; }
+        function formatArabicTimeWithSeconds(date) { const h = date.getHours(); return `${h % 12 || 12}:${String(date.getMinutes()).padStart(2,'0')}:${String(date.getSeconds()).padStart(2,'0')} ${getArabicPeriod(h)}`; }
+
+        // =====================
+        // AUTH DETECTION
+        // =====================
+        // Pick up agent token from URL hash (sent by the extension)
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        if (hashParams.get('agentToken')) {
+            localStorage.setItem('agentToken', hashParams.get('agentToken'));
+            history.replaceState(null, '', window.location.pathname);
+        }
+
+        const adminToken = localStorage.getItem('adminToken');
+        const agentToken = localStorage.getItem('agentToken');
+        const token = adminToken || agentToken;
+        const isAdmin = !!adminToken;
+        const isAgent = !isAdmin && !!agentToken;
+
+        if (!token) { window.location.href = '/'; }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) {
+                    localStorage.removeItem('adminToken');
+                    localStorage.removeItem('agentToken');
+                    window.location.href = '/';
+                }
+                return res;
+            });
+        }
+
+        // Hide admin-only elements for agents and show agent name as title
+        if (isAgent) {
+            document.getElementById('live-section').classList.add('hidden');
+            document.getElementById('header-right').classList.add('hidden');
+            document.getElementById('agent-picker-field').classList.add('hidden');
+            document.querySelector('.section-divider').classList.add('hidden');
+            document.getElementById('agent-nav').classList.remove('hidden');
+            authFetch('/api/agent/me').then(r => r.json()).then(data => {
+                const agentName = data.name || data.email || 'Agent';
+                document.getElementById('page-title').textContent = agentName + "'s Overview";
+                document.title = agentName + "'s Overview";
+            }).catch(() => {
+                document.getElementById('page-title').textContent = 'My Overview';
+            });
+        }
+
+        function logout() {
+            const logoutUrl = isAdmin ? '/api/admin/logout' : '/api/agent/logout';
+            authFetch(logoutUrl, { method: 'POST' });
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('agentToken');
+            window.location.href = '/';
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 0) seconds = 0;
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (mins < 60) return mins + 'm ' + secs + 's';
+            const hours = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hours + 'h ' + remMins + 'm';
+        }
+
+        function formatHours(seconds) {
+            return (seconds / 3600).toFixed(1);
+        }
+
+        function formatCurrency(amount) {
+            return parseFloat(amount || 0).toFixed(2);
+        }
+
+        function formatShortDate(dateStr) {
+            const d = new Date(dateStr + 'T00:00:00');
+            return formatArabicShortDate(d);
+        }
+
+        // =====================
+        // LIVE OVERVIEW (admin only)
+        // =====================
+        const statusLabels = { active: 'Active', idle: 'Idle', on_break: 'On Break', off_shift: 'Off Shift' };
+        let thresholdsCache = { warning: 5 * 60, critical: 10 * 60, maxSession: 30 * 60 };
+
+        async function fetchThresholds() {
+            if (!isAdmin) return;
+            try {
+                const res = await authFetch('/api/settings');
+                const data = await res.json();
+                thresholdsCache = {
+                    warning: (parseInt(data.idle_warning_minutes) || 5) * 60,
+                    critical: (parseInt(data.idle_critical_minutes) || 10) * 60,
+                    maxSession: (parseInt(data.max_session_minutes) || 30) * 60,
+                };
+            } catch (err) { /* use cached defaults */ }
+        }
+
+        function getThresholds() { return thresholdsCache; }
+
+        async function loadOverview() {
+            if (!isAdmin) return;
+            const container = document.getElementById("cards-container");
+            const alertBanner = document.getElementById("idle-alert");
+            const sessionBanner = document.getElementById("session-alert");
+            try {
+                const res = await authFetch("/api/overview");
+                const agents = await res.json();
+                if (agents.length === 0) {
+                    container.innerHTML = '<div class="empty">No active agents.</div>';
+                    alertBanner.style.display = 'none';
+                    sessionBanner.style.display = 'none';
+                    return;
+                }
+
+                const warningAgents = [];
+                const criticalAgents = [];
+                const sessionExceededAgents = [];
+
+                container.innerHTML = agents.map(agent => {
+                    let detailsHtml = '';
+                    let idleClass = '';
+                    let badgeClass = agent.status;
+
+                    if (agent.status === 'active') {
+                        const chatSec = Math.round((Date.now() - new Date(agent.current_chat_started_at).getTime()) / 1000);
+                        const exceeded = chatSec >= thresholdsCache.maxSession;
+                        if (exceeded) {
+                            idleClass = ' session-exceeded';
+                            badgeClass = 'session-exceeded';
+                            sessionExceededAgents.push(agent.name || agent.email);
+                        }
+                        detailsHtml = `
+                            <div class="card-detail"><strong>Chat:</strong> ${agent.current_chat_name || 'Unknown'}</div>
+                            <div class="card-detail${exceeded ? ' session-exceeded-text' : ''}"><strong>In chat for:</strong> ${formatDuration(chatSec)}${exceeded ? ' (exceeded!)' : ''}</div>
+                        `;
+                    } else if (agent.status === 'idle') {
+                        const idleSec = Math.round((Date.now() - new Date(agent.idle_since).getTime()) / 1000);
+                        const agentLabel = agent.name || agent.email;
+                        const { warning: IDLE_WARNING_SEC, critical: IDLE_CRITICAL_SEC } = getThresholds();
+                        if (idleSec >= IDLE_CRITICAL_SEC) {
+                            idleClass = ' idle-critical';
+                            badgeClass = 'idle-critical';
+                            criticalAgents.push(agentLabel);
+                        } else if (idleSec >= IDLE_WARNING_SEC) {
+                            idleClass = ' idle-warning';
+                            badgeClass = 'idle-warning';
+                            warningAgents.push(agentLabel);
+                        }
+                        detailsHtml = `<div class="card-detail"><strong>Idle for:</strong> ${formatDuration(idleSec)}</div>`;
+                    } else if (agent.status === 'on_break') {
+                        detailsHtml = `<div class="card-detail" style="color:#6366f1;"><strong>On Break</strong></div>`;
+                        if (agent.shift_break_seconds) {
+                            detailsHtml += `<div class="card-detail"><strong>Break time:</strong> ${formatDuration(agent.shift_break_seconds)}</div>`;
+                        }
+                    }
+
+                    let shiftHtml = '';
+                    if (agent.shift_started_at) {
+                        const shiftSec = Math.round((Date.now() - new Date(agent.shift_started_at).getTime()) / 1000);
+                        shiftHtml = `<div class="card-detail"><strong>Shift:</strong> ${formatDuration(shiftSec)}</div>`;
+                        if (agent.shift_idle_seconds != null) {
+                            shiftHtml += `<div class="card-detail"><strong>Idle in shift:</strong> ${formatDuration(agent.shift_idle_seconds)}</div>`;
+                        }
+                    }
+
+                    return `
+                        <div class="agent-card status-${agent.status}${idleClass}">
+                            <div class="card-header">
+                                <div class="agent-name">${agent.name || agent.email}</div>
+                                <span class="status-badge ${badgeClass}">${statusLabels[agent.status]}</span>
+                            </div>
+                            ${detailsHtml}
+                            ${shiftHtml}
+                            <div class="card-detail"><strong>Chats today:</strong> ${agent.today_sessions}</div>
+                        </div>
+                    `;
+                }).join('');
+
+                const thresholds = getThresholds();
+                if (criticalAgents.length > 0) {
+                    alertBanner.textContent = 'ALERT: ' + criticalAgents.join(', ') + ' idle for over ' + (thresholds.critical / 60) + ' minutes!';
+                    alertBanner.className = 'idle-alert-banner critical';
+                    alertBanner.style.display = 'block';
+                } else if (warningAgents.length > 0) {
+                    alertBanner.textContent = 'WARNING: ' + warningAgents.join(', ') + ' idle for over ' + (thresholds.warning / 60) + ' minutes';
+                    alertBanner.className = 'idle-alert-banner warning';
+                    alertBanner.style.display = 'block';
+                } else {
+                    alertBanner.style.display = 'none';
+                }
+
+                if (sessionExceededAgents.length > 0) {
+                    sessionBanner.textContent = 'ALERT: ' + sessionExceededAgents.join(', ') + ' in chat for over ' + (thresholdsCache.maxSession / 60) + ' minutes!';
+                    sessionBanner.className = 'idle-alert-banner critical';
+                    sessionBanner.style.display = 'block';
+                } else {
+                    sessionBanner.style.display = 'none';
+                }
+            } catch (err) {
+                container.innerHTML = '<div class="empty">Failed to load overview.</div>';
+            }
+        }
+
+        // =====================
+        // AGENT OVERVIEW
+        // =====================
+        let currentPeriod = 'month';
+        let chartSessions = null;
+        let chartActivity = null;
+        let chartProductivity = null;
+        let chartSalaryHistory = null;
+
+        function setDefaultDate() {
+            document.getElementById('ov-date').value = new Date().toISOString().slice(0, 10);
+        }
+
+        function setPeriod(period) {
+            currentPeriod = period;
+            document.querySelectorAll('#period-toggle button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === period);
+            });
+            loadAgentOverview();
+        }
+
+        async function loadAgentList() {
+            if (!isAdmin) return;
+            try {
+                const res = await authFetch('/api/agents');
+                const agents = await res.json();
+                const select = document.getElementById('ov-agent-select');
+                agents.forEach(agent => {
+                    const option = document.createElement('option');
+                    option.value = agent.id;
+                    option.textContent = agent.name ? `${agent.name} (${agent.email})` : agent.email;
+                    select.appendChild(option);
+                });
+            } catch (err) { /* ignore */ }
+        }
+
+        async function getAgentIdForOverview() {
+            if (isAdmin) {
+                return document.getElementById('ov-agent-select').value;
+            }
+            // Agent: fetch their own ID
+            try {
+                const res = await authFetch('/api/agent/me');
+                const data = await res.json();
+                return data.id;
+            } catch (err) {
+                return null;
+            }
+        }
+
+        let agentIdCache = null;
+
+        async function loadAgentOverview() {
+            let agentId;
+            if (isAdmin) {
+                agentId = document.getElementById('ov-agent-select').value;
+            } else {
+                if (!agentIdCache) {
+                    agentIdCache = await getAgentIdForOverview();
+                }
+                agentId = agentIdCache;
+            }
+
+            if (!agentId) {
+                document.getElementById('ov-content').classList.add('hidden');
+                document.getElementById('ov-empty').style.display = '';
+                return;
+            }
+
+            const date = document.getElementById('ov-date').value;
+            if (!date) return;
+
+            try {
+                const res = await authFetch(`/api/agent-overview/${agentId}?period=${currentPeriod}&date=${date}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    document.getElementById('ov-empty').textContent = err.error || 'Failed to load overview';
+                    document.getElementById('ov-empty').style.display = '';
+                    document.getElementById('ov-content').classList.add('hidden');
+                    return;
+                }
+
+                const data = await res.json();
+                document.getElementById('ov-empty').style.display = 'none';
+                document.getElementById('ov-content').classList.remove('hidden');
+
+                renderPeriodLabel(data.period);
+                renderSalaryCards(data.salary, data.period);
+                renderPerformanceCards(data.performance);
+                renderCharts(data.daily_breakdown, data.salary_history);
+            } catch (err) {
+                document.getElementById('ov-empty').textContent = 'Failed to load agent overview — check your connection.';
+                document.getElementById('ov-empty').style.display = '';
+                document.getElementById('ov-content').classList.add('hidden');
+            }
+        }
+
+        function renderPeriodLabel(period) {
+            const start = new Date(period.start + 'T00:00:00');
+            const end = new Date(period.end + 'T00:00:00');
+            let label = '';
+            if (period.type === 'day') {
+                label = formatArabicDateNoDay(start);
+            } else {
+                label = formatArabicDateNoDay(start) + ' — ' + formatArabicDateNoDay(end);
+            }
+            document.getElementById('ov-period-label').textContent = label;
+        }
+
+        function renderSalaryCards(salary, period) {
+            const container = document.getElementById('salary-cards');
+            const monthLabel = document.getElementById('salary-month-label');
+            monthLabel.textContent = '(' + period.start.slice(0, 7) + ')';
+
+            if (!salary) {
+                container.innerHTML = '<div style="color:#999; font-size:14px;">No salary defined for this agent.</div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="summary-card">
+                    <div class="label">Basic Salary</div>
+                    <div class="value">${formatCurrency(salary.basic_salary)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Bonus</div>
+                    <div class="value">${formatCurrency(salary.bonus)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Overtime</div>
+                    <div class="value blue">+${formatCurrency(salary.total_overtime)}</div>
+                </div>
+                <div class="summary-card red">
+                    <div class="label">Deductions</div>
+                    <div class="value">-${formatCurrency(salary.total_deductions)}</div>
+                </div>
+                <div class="summary-card green">
+                    <div class="label">Net Salary</div>
+                    <div class="value">${formatCurrency(salary.net_salary)}</div>
+                </div>
+            `;
+        }
+
+        function renderPerformanceCards(perf) {
+            document.getElementById('performance-cards').innerHTML = `
+                <div class="summary-card">
+                    <div class="label">Total Sessions</div>
+                    <div class="value">${perf.total_sessions}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Work Hours</div>
+                    <div class="value">${formatDuration(perf.total_shift_seconds)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Active Hours</div>
+                    <div class="value blue">${formatDuration(perf.total_active_seconds)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Idle Hours</div>
+                    <div class="value red">${formatDuration(perf.total_idle_seconds)}</div>
+                </div>
+                <div class="summary-card green">
+                    <div class="label">Productivity</div>
+                    <div class="value">${perf.productivity_percentage}%</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Avg Session</div>
+                    <div class="value">${formatDuration(perf.average_session_seconds)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Avg Msgs/Session</div>
+                    <div class="value">${perf.average_messages_per_session}</div>
+                </div>
+                <div class="summary-card blue">
+                    <div class="label">Avg Response</div>
+                    <div class="value">${formatDuration(perf.average_response_seconds || 0)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">Min / Max Response</div>
+                    <div class="value" style="font-size:14px;">${formatDuration(perf.min_response_seconds || 0)} / ${formatDuration(perf.max_response_seconds || 0)}</div>
+                </div>
+            `;
+        }
+
+        // =====================
+        // CHARTS
+        // =====================
+        const CHART_COLORS = {
+            green: 'rgba(40, 167, 69, 0.7)',
+            greenBorder: 'rgba(40, 167, 69, 1)',
+            blue: 'rgba(0, 123, 255, 0.7)',
+            blueBorder: 'rgba(0, 123, 255, 1)',
+            red: 'rgba(220, 53, 69, 0.5)',
+            redBorder: 'rgba(220, 53, 69, 1)',
+            orange: 'rgba(253, 126, 20, 0.7)',
+            orangeBorder: 'rgba(253, 126, 20, 1)',
+            gray: 'rgba(108, 117, 125, 0.5)',
+            grayBorder: 'rgba(108, 117, 125, 1)',
+        };
+
+        function destroyCharts() {
+            [chartSessions, chartActivity, chartProductivity, chartSalaryHistory].forEach(c => { if (c) c.destroy(); });
+            chartSessions = chartActivity = chartProductivity = chartSalaryHistory = null;
+        }
+
+        function renderCharts(dailyBreakdown, salaryHistory) {
+            destroyCharts();
+
+            const labels = dailyBreakdown.map(d => formatShortDate(d.date));
+            const sessionsData = dailyBreakdown.map(d => d.sessions);
+            const activeHours = dailyBreakdown.map(d => +(d.active_seconds / 3600).toFixed(2));
+            const idleHours = dailyBreakdown.map(d => {
+                const idle = d.shift_seconds - d.active_seconds;
+                return +(Math.max(0, idle) / 3600).toFixed(2);
+            });
+            const productivityData = dailyBreakdown.map(d => {
+                return d.shift_seconds > 0 ? Math.round((d.active_seconds / d.shift_seconds) * 100) : 0;
+            });
+
+            // Sessions bar chart
+            chartSessions = new Chart(document.getElementById('sessionsChart'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Sessions',
+                        data: sessionsData,
+                        backgroundColor: CHART_COLORS.blue,
+                        borderColor: CHART_COLORS.blueBorder,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                }
+            });
+
+            // Active vs Idle stacked bar
+            chartActivity = new Chart(document.getElementById('activityChart'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Active Hours',
+                            data: activeHours,
+                            backgroundColor: CHART_COLORS.green,
+                            borderColor: CHART_COLORS.greenBorder,
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Idle Hours',
+                            data: idleHours,
+                            backgroundColor: CHART_COLORS.gray,
+                            borderColor: CHART_COLORS.grayBorder,
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+                }
+            });
+
+            // Productivity line chart
+            chartProductivity = new Chart(document.getElementById('productivityChart'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Productivity %',
+                        data: productivityData,
+                        borderColor: CHART_COLORS.orangeBorder,
+                        backgroundColor: CHART_COLORS.orange,
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } }
+                }
+            });
+
+            // Salary history bar chart
+            if (salaryHistory && salaryHistory.length > 0) {
+                document.getElementById('salary-history-box').style.display = '';
+                const salaryLabels = salaryHistory.map(s => s.month);
+                chartSalaryHistory = new Chart(document.getElementById('salaryHistoryChart'), {
+                    type: 'bar',
+                    data: {
+                        labels: salaryLabels,
+                        datasets: [{
+                            label: 'Net Salary',
+                            data: salaryHistory.map(s => parseFloat(s.net_salary)),
+                            backgroundColor: CHART_COLORS.green,
+                            borderColor: CHART_COLORS.greenBorder,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+            } else {
+                document.getElementById('salary-history-box').style.display = 'none';
+            }
+        }
+
+        // =====================
+        // LIVE ACTIVITY FEED
+        // =====================
+        let lastFeedId = null;
+        const seenEventIds = new Set();
+
+        function formatEventDescription(event) {
+            const name = event.agent_name || "Unknown";
+            const chat = event.chat_name || "Unknown chat";
+            const meta = event.metadata || {};
+            const responseTime = meta.response_time_seconds ? formatDuration(meta.response_time_seconds) : null;
+            const durationSec = meta.duration_seconds ? formatDuration(meta.duration_seconds) : null;
+            const reason = meta.reason || "";
+
+            switch (event.event_type) {
+                case "session_started":
+                    return `<span class="feed-agent">${name}</span> opened chat with <strong>${chat}</strong>`;
+                case "session_ended":
+                    if (reason === "auto_timeout") return `<span class="feed-agent">${name}</span>'s session auto-closed (timeout)`;
+                    if (reason === "new_chat_opened") return `<span class="feed-agent">${name}</span>'s previous chat closed (new chat opened)`;
+                    return `<span class="feed-agent">${name}</span> closed chat` + (durationSec ? ` (${durationSec})` : "");
+                case "message_sent":
+                    return `<span class="feed-agent">${name}</span> sent message` + (responseTime ? ` (response: ${responseTime})` : "");
+                case "idle_started":
+                    return `<span class="feed-agent">${name}</span> went idle (in session)`;
+                case "idle_resumed":
+                    return `<span class="feed-agent">${name}</span> resumed activity`;
+                case "shift_started":
+                    return `<span class="feed-agent">${name}</span> started shift`;
+                case "shift_ended":
+                    return `<span class="feed-agent">${name}</span> ended shift` + (durationSec ? ` (${durationSec})` : "");
+                case "tab_focus_lost":
+                    return `<span class="feed-agent">${name}</span> left tab`;
+                case "tab_focus_gained":
+                    return `<span class="feed-agent">${name}</span> returned to tab`;
+                default:
+                    return `<span class="feed-agent">${name}</span> — ${event.event_type}`;
+            }
+        }
+
+        function formatFeedTime(isoStr) {
+            const d = new Date(isoStr);
+            return formatArabicTimeWithSeconds(d);
+        }
+
+        async function loadActivityFeed() {
+            if (!isAdmin) return;
+            try {
+                const url = "/api/activity-feed?limit=50" + (lastFeedId ? "&since_id=" + lastFeedId : "");
+                const res = await authFetch(url);
+                const data = await res.json();
+                if (!data.events || data.events.length === 0) return;
+
+                const container = document.getElementById("activity-feed");
+                // Clear placeholder on first load
+                if (seenEventIds.size === 0) container.innerHTML = "";
+
+                // Events come newest-first from API, reverse to prepend in correct order (oldest first)
+                const newEvents = data.events.reverse();
+                for (const event of newEvents) {
+                    if (seenEventIds.has(event.id)) continue;
+                    seenEventIds.add(event.id);
+
+                    const typeClass = event.metadata?.reason === "auto_timeout" ? "type-auto_timeout" : "type-" + event.event_type;
+                    const entry = document.createElement("div");
+                    entry.className = "feed-entry " + typeClass;
+                    entry.innerHTML = `
+                        <span class="feed-time">${formatFeedTime(event.created_at)}</span>
+                        <span>${formatEventDescription(event)}</span>
+                    `;
+                    container.prepend(entry);
+                }
+
+                // Keep feed from growing too large (max 100 entries)
+                const MAX_FEED_ENTRIES = 100;
+                while (container.children.length > MAX_FEED_ENTRIES) {
+                    container.removeChild(container.lastChild);
+                }
+
+                if (data.latest_id) {
+                    lastFeedId = data.latest_id;
+                }
+            } catch (err) {
+                console.error("Failed to load activity feed:", err);
+            }
+        }
+
+        // =====================
+        // AGENT DEMAND
+        // =====================
+        async function loadAgentDemand() {
+            if (!isAdmin) return;
+            const container = document.getElementById("demand-container");
+            const totalLabel = document.getElementById("demand-total");
+            const refreshTime = document.getElementById("demand-refresh-time");
+            try {
+                const res = await authFetch("/api/agent-demand");
+                const demandData = await res.json();
+
+                if (!demandData.agents || demandData.agents.length === 0) {
+                    container.innerHTML = '<div class="empty">No agents with Fitstn ID configured. Set it in the Agents page.</div>';
+                    totalLabel.textContent = '';
+                    refreshTime.textContent = '';
+                    return;
+                }
+
+                const agentTotal = demandData.agents.reduce((sum, d) => sum + d.demand_count, 0);
+                const unassignedCount = demandData.unassigned_count || 0;
+                const otherStaffCount = demandData.other_staff_count || 0;
+                const globalTotal = demandData.global_total || 0;
+                totalLabel.textContent = `Total waiting rooms: ${globalTotal}`;
+
+                const sorted = [...demandData.agents].sort((a, b) => b.demand_count - a.demand_count);
+
+                let cardsHtml = sorted.map(d => {
+                    let demandClass = 'no-demand';
+                    if (d.demand_count >= 20) demandClass = 'high-demand';
+                    else if (d.demand_count >= 10) demandClass = 'medium-demand';
+
+                    return `
+                        <div class="demand-card ${demandClass}">
+                            <span class="demand-agent">${d.agent_name}</span>
+                            <span class="demand-count">${d.demand_count}</span>
+                        </div>
+                    `;
+                }).join('');
+
+                if (otherStaffCount > 0) {
+                    cardsHtml += `
+                        <div class="demand-card unassigned">
+                            <span class="demand-agent">Other Staff</span>
+                            <span class="demand-count">${otherStaffCount}</span>
+                        </div>
+                    `;
+                }
+
+                cardsHtml += `
+                    <div class="demand-card unassigned">
+                        <span class="demand-agent">Unassigned</span>
+                        <span class="demand-count">${unassignedCount}</span>
+                    </div>
+                `;
+
+                container.innerHTML = cardsHtml;
+
+                refreshTime.textContent = '(updated ' + formatArabicTimeWithSeconds(new Date()) + ')';
+            } catch (err) {
+                console.error("Failed to load demand:", err);
+                container.innerHTML = '<div class="empty">Failed to load demand data.</div>';
+            }
+        }
+
+        // =====================
+        // AGENT WORKLOAD
+        // =====================
+        async function loadAgentWorkload() {
+            if (!isAdmin) return;
+            const container = document.getElementById('workload-container');
+            const summaryLabel = document.getElementById('workload-summary');
+            const refreshTime = document.getElementById('workload-refresh-time');
+            try {
+                const res = await authFetch('/api/agent-workload');
+                const data = await res.json();
+
+                if (!data.agents || data.agents.length === 0) {
+                    container.innerHTML = '<div class="empty">No agents with Fitstn ID configured.</div>';
+                    summaryLabel.textContent = '';
+                    return;
+                }
+
+                const cutoffLabel = data.sla_cutoff_time || '--:--';
+                const hoursLeft = data.hours_remaining;
+                const isPast = data.is_past_cutoff;
+                const avgMin = data.avg_minutes_per_chat;
+
+                summaryLabel.innerHTML = 'SLA Cutoff: <span>' + cutoffLabel + '</span>' +
+                    (isPast
+                        ? ' &mdash; <span style="color:#dc3545;">Past cutoff — remaining chats shift to tomorrow</span>'
+                        : ' &mdash; <span>' + hoursLeft + 'h remaining</span>') +
+                    ' &nbsp;|&nbsp; Avg per chat: <span>' + avgMin + ' min</span>' +
+                    ' &nbsp;|&nbsp; Capacity: <span>' + data.max_chats_per_hour + ' chats/hr</span>';
+
+                const sorted = [...data.agents].sort((a, b) => b.workload_ratio - a.workload_ratio);
+
+                container.innerHTML = sorted.map(function(agent) {
+                    const barWidth = Math.min(100, Math.round(agent.workload_ratio * 100));
+                    const paceLabel = isPast ? '—' : (agent.required_pace + ' chats/hr needed');
+
+                    return '<div class="workload-card status-' + agent.status + '">' +
+                        '<div class="wl-header">' +
+                            '<span class="wl-agent">' + agent.agent_name + '</span>' +
+                            '<span class="wl-badge ' + agent.status + '">' + agent.status + '</span>' +
+                        '</div>' +
+                        '<div class="wl-stats">' +
+                            '<strong>' + agent.demand_count + '</strong> chats waiting<br>' +
+                            paceLabel + '<br>' +
+                            'Load: <strong>' + Math.round(agent.workload_ratio * 100) + '%</strong>' +
+                        '</div>' +
+                        '<div class="wl-bar"><div class="wl-bar-fill ' + agent.status + '" style="width:' + barWidth + '%"></div></div>' +
+                    '</div>';
+                }).join('');
+
+                refreshTime.textContent = '(updated ' + formatArabicTimeWithSeconds(new Date()) + ')';
+            } catch (err) {
+                console.error('Failed to load workload:', err);
+                container.innerHTML = '<div class="empty">Failed to load workload data.</div>';
+            }
+        }
+
+        // =====================
+        // HISTORICAL DEMAND
+        // =====================
+        let demandHistoryChart = null;
+        const HISTORY_LINE_COLORS = ['#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1', '#20c997', '#e83e8c', '#17a2b8'];
+
+        async function loadDemandHistory() {
+            if (!isAdmin) return;
+            const days = document.getElementById('history-days').value;
+            const refreshTime = document.getElementById('history-refresh-time');
+            const emptyMsg = document.getElementById('history-empty');
+            const chartBox = document.querySelector('.history-chart-box');
+            try {
+                const res = await authFetch('/api/demand-history?days=' + days);
+                const data = await res.json();
+
+                if (!data.snapshots || data.snapshots.length === 0) {
+                    emptyMsg.style.display = 'block';
+                    chartBox.style.display = 'none';
+                    if (demandHistoryChart) { demandHistoryChart.destroy(); demandHistoryChart = null; }
+                    refreshTime.textContent = '';
+                    return;
+                }
+
+                emptyMsg.style.display = 'none';
+                chartBox.style.display = 'block';
+
+                // Group by date and agent
+                const dateSet = new Set();
+                const agentMap = {};
+                for (const row of data.snapshots) {
+                    const dateLabel = row.snapshot_date.slice(0, 10);
+                    dateSet.add(dateLabel);
+                    if (!agentMap[row.agent_name]) agentMap[row.agent_name] = {};
+                    agentMap[row.agent_name][dateLabel] = row.demand_count;
+                }
+
+                const dates = Array.from(dateSet).sort();
+                const agentNames = Object.keys(agentMap).sort();
+
+                const datasets = agentNames.map(function(name, index) {
+                    return {
+                        label: name,
+                        data: dates.map(function(d) { return agentMap[name][d] || 0; }),
+                        borderColor: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length],
+                        backgroundColor: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length] + '22',
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 3,
+                    };
+                });
+
+                // Add total line
+                datasets.push({
+                    label: 'Total',
+                    data: dates.map(function(d) {
+                        return agentNames.reduce(function(sum, name) { return sum + (agentMap[name][d] || 0); }, 0);
+                    }),
+                    borderColor: '#333',
+                    borderDash: [6, 3],
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                });
+
+                if (demandHistoryChart) demandHistoryChart.destroy();
+
+                demandHistoryChart = new Chart(document.getElementById('demandHistoryChart'), {
+                    type: 'line',
+                    data: { labels: dates, datasets: datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top', labels: { boxWidth: 12, font: { size: 12 } } },
+                            tooltip: { mode: 'index', intersect: false },
+                        },
+                        scales: {
+                            x: { ticks: { font: { size: 11 } } },
+                            y: { beginAtZero: true, title: { display: true, text: 'Waiting Chats' } },
+                        },
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                    },
+                });
+
+                refreshTime.textContent = '(updated ' + formatArabicTimeWithSeconds(new Date()) + ')';
+            } catch (err) {
+                console.error('Failed to load demand history:', err);
+                emptyMsg.style.display = 'block';
+                emptyMsg.textContent = 'Failed to load historical data.';
+                chartBox.style.display = 'none';
+            }
+        }
+
+        async function takeDemandSnapshot() {
+            const statusEl = document.getElementById('snapshot-status');
+            statusEl.textContent = 'Taking snapshot...';
+            statusEl.style.color = '#555';
+            try {
+                const res = await authFetch('/api/demand-snapshot', { method: 'POST' });
+                const data = await res.json();
+                statusEl.textContent = 'Saved ' + data.saved + ' agents for ' + data.snapshot_date;
+                statusEl.style.color = '#28a745';
+                loadDemandHistory();
+            } catch (err) {
+                console.error('Snapshot failed:', err);
+                statusEl.textContent = 'Snapshot failed — check console';
+                statusEl.style.color = '#dc3545';
+            }
+        }
+
+        // =====================
+        // INIT
+        // =====================
+        setDefaultDate();
+
+        if (isAdmin) {
+            fetchThresholds().then(() => loadOverview());
+            setInterval(loadOverview, 5000);
+            setInterval(fetchThresholds, 30000);
+            loadAgentList();
+            loadActivityFeed();
+            setInterval(loadActivityFeed, 5000);
+            loadAgentDemand();
+            setInterval(loadAgentDemand, 30000);
+            loadAgentWorkload();
+            setInterval(loadAgentWorkload, 30000);
+            loadDemandHistory();
+        }
+
+        if (isAgent) {
+            // Auto-load agent's own overview
+            loadAgentOverview();
+        }
+    </script>
+</body>
+</html>

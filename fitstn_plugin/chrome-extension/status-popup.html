@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { width: 220px; padding: 14px; font-family: Arial, sans-serif; background: #fff; }
+        .status-indicator { display: inline-block; padding: 5px 14px; border-radius: 12px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+        .status-active { background: #d4edda; color: #155724; }
+        .status-idle { background: #fff3cd; color: #856404; }
+        .status-off_shift { background: #e2e3e5; color: #383d41; }
+        .status-detail { font-size: 11px; color: #888; margin-top: 6px; }
+        .not-signed-in { font-size: 12px; color: #888; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="status-container" style="text-align:center;">
+        <span id="status-badge" class="status-indicator"></span>
+        <p id="status-detail" class="status-detail"></p>
+    </div>
+    <p id="not-signed-in" class="not-signed-in" style="display:none;">Not signed in</p>
+    <script src="status-popup.js"></script>
+</body>
+</html>

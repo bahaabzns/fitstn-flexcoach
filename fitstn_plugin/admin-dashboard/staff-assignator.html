@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Staff Assignator</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+
+        .card { background: #fff; border-radius: 8px; padding: 24px 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .card h2 { margin: 0 0 8px; font-size: 18px; color: #333; }
+        .card p { margin: 0 0 16px; color: #666; font-size: 14px; }
+
+        .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn { padding: 10px 24px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: #333; color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #555; }
+        .btn-secondary { background: #fff; color: #333; border: 1px solid #ddd; }
+        .btn-secondary:hover:not(:disabled) { background: #f0f0f0; }
+
+        .status-bar { padding: 12px 16px; border-radius: 6px; font-size: 14px; display: none; margin-bottom: 16px; }
+        .status-bar.info { display: block; background: #e0e7ff; color: #3730a3; }
+        .status-bar.success { display: block; background: #d4edda; color: #155724; }
+        .status-bar.error { display: block; background: #fee2e2; color: #b91c1c; }
+        .status-bar.loading { display: block; background: #fef3c7; color: #92400e; }
+
+        .results { display: none; }
+        .results.visible { display: block; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; }
+        .stat-box .stat-value { font-size: 28px; font-weight: 700; color: #333; }
+        .stat-box .stat-label { font-size: 12px; color: #777; margin-top: 4px; }
+        .stat-box.green .stat-value { color: #059669; }
+        .stat-box.yellow .stat-value { color: #d97706; }
+        .stat-box.red .stat-value { color: #dc2626; }
+
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
+        th { background: #333; color: #fff; }
+        tr:hover { background: #f9f9f9; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+
+        .error-list { max-height: 200px; overflow-y: auto; background: #fff5f5; border: 1px solid #fecaca; border-radius: 6px; padding: 12px; margin-top: 12px; font-size: 13px; color: #b91c1c; }
+        .error-list div { padding: 4px 0; border-bottom: 1px solid #fecaca; }
+        .error-list div:last-child { border-bottom: none; }
+
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #92400e; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Admin Dashboard</h1>
+        <div>
+            <nav style="display:inline;">
+                <a href="/overview.html">Overview</a>
+                <a href="/dashboard.html">Sessions</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/staff-assignator.html" class="active">Assignator</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Staff Assignator</h2>
+        <p>Sync agent assignments from the CRM into FlexCoach. Use <strong>Dry Run</strong> to preview changes without applying them.</p>
+        <div id="status-bar" class="status-bar"></div>
+        <div class="actions">
+            <button class="btn btn-secondary" id="btn-dry-run" onclick="runAssignator(true)">Dry Run (Preview)</button>
+            <button class="btn btn-primary" id="btn-run" onclick="runAssignator(false)">Run Assignator</button>
+        </div>
+    </div>
+
+    <div id="results" class="results">
+        <div id="stats-grid" class="stats-grid"></div>
+
+        <div id="preview-section" style="display:none;">
+            <h3 style="margin: 0 0 12px; font-size: 16px; color: #333;">Preview (first 20 assignments)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Client Code</th>
+                        <th>Client Name</th>
+                        <th>CRM Agent</th>
+                        <th>FlexCoach Agent</th>
+                    </tr>
+                </thead>
+                <tbody id="preview-body"></tbody>
+            </table>
+        </div>
+
+        <div id="errors-section" style="display:none;">
+            <h3 style="margin: 16px 0 8px; font-size: 16px; color: #b91c1c;">Errors</h3>
+            <div id="errors-list" class="error-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem("adminToken");
+        if (!token) { window.location.href = "/"; }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, Authorization: "Bearer " + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) { localStorage.removeItem("adminToken"); window.location.href = "/"; }
+                return res;
+            });
+        }
+
+        function logout() {
+            authFetch("/api/admin/logout", { method: "POST" });
+            localStorage.removeItem("adminToken");
+            window.location.href = "/";
+        }
+
+        function setStatus(type, message) {
+            const bar = document.getElementById("status-bar");
+            bar.className = "status-bar " + type;
+            bar.innerHTML = type === "loading"
+                ? '<span class="spinner"></span>' + message
+                : message;
+        }
+
+        function setButtonsDisabled(isDisabled) {
+            document.getElementById("btn-dry-run").disabled = isDisabled;
+            document.getElementById("btn-run").disabled = isDisabled;
+        }
+
+        function renderStats(data) {
+            const grid = document.getElementById("stats-grid");
+            const stats = [
+                { label: "CRM Clients", value: data.crmClientsCount, cls: "" },
+                { label: "FlexCoach Rooms", value: data.flexRoomsCount, cls: "" },
+                { label: "Matched", value: data.matched, cls: "green" },
+                { label: "Unmatched", value: data.unmatched, cls: "yellow" },
+            ];
+
+            if (data.dryRun) {
+                stats.push({ label: "Assignable", value: data.assignableCount, cls: "green" });
+            } else {
+                stats.push({ label: "To Assign", value: data.totalToAssign, cls: "" });
+                stats.push({ label: "Success", value: data.success, cls: "green" });
+                stats.push({ label: "Skipped", value: data.skipped, cls: "yellow" });
+                stats.push({ label: "Failed", value: data.failed, cls: "red" });
+            }
+
+            grid.innerHTML = stats.map(s =>
+                `<div class="stat-box ${s.cls}">
+                    <div class="stat-value">${s.value}</div>
+                    <div class="stat-label">${s.label}</div>
+                </div>`
+            ).join("");
+        }
+
+        function renderPreview(preview) {
+            const section = document.getElementById("preview-section");
+            const tbody = document.getElementById("preview-body");
+
+            if (!preview || preview.length === 0) {
+                section.style.display = "none";
+                return;
+            }
+
+            section.style.display = "block";
+            tbody.innerHTML = preview.map(row =>
+                `<tr>
+                    <td>${row.client_code}</td>
+                    <td>${row.client_name || "-"}</td>
+                    <td>${row.crm_agent_name || "-"}</td>
+                    <td>${row.flexcoach_agent_name || "-"}</td>
+                </tr>`
+            ).join("");
+        }
+
+        function renderErrors(errors) {
+            const section = document.getElementById("errors-section");
+            const list = document.getElementById("errors-list");
+
+            if (!errors || errors.length === 0) {
+                section.style.display = "none";
+                return;
+            }
+
+            section.style.display = "block";
+            list.innerHTML = errors.map(e => `<div>${e}</div>`).join("");
+        }
+
+        async function runAssignator(isDryRun) {
+            const resultsEl = document.getElementById("results");
+            document.getElementById("preview-section").style.display = "none";
+            document.getElementById("errors-section").style.display = "none";
+
+            setButtonsDisabled(true);
+            setStatus("loading", isDryRun ? "Running dry run — fetching data from CRM and FlexCoach..." : "Running assignator — this may take a few minutes...");
+
+            if (!isDryRun && !confirm("This will assign staff in FlexCoach for real. Continue?")) {
+                setButtonsDisabled(false);
+                setStatus("info", "Cancelled by user.");
+                return;
+            }
+
+            try {
+                const res = await authFetch("/api/staff-assignator/run", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ dryRun: isDryRun }),
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    setStatus("error", "Failed: " + (data.details || data.error));
+                    setButtonsDisabled(false);
+                    return;
+                }
+
+                resultsEl.classList.add("visible");
+                renderStats(data);
+
+                if (isDryRun) {
+                    setStatus("success", `Dry run complete — ${data.assignableCount} clients ready to assign.`);
+                    renderPreview(data.preview);
+                } else {
+                    const statusType = data.failed > 0 ? "error" : "success";
+                    setStatus(statusType, `Done — ${data.success} assigned, ${data.skipped} skipped, ${data.failed} failed.`);
+                    renderErrors(data.errors);
+                }
+            } catch (err) {
+                setStatus("error", "Network error — " + err.message);
+            }
+
+            setButtonsDisabled(false);
+        }
+    </script>
+</body>
+</html>

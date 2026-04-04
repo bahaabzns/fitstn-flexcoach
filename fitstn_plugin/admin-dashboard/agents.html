@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Agents</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #333; color: #fff; }
+        tr:hover { background: #f9f9f9; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .form-section { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+        .form-section h2 { margin-top: 0; color: #333; font-size: 18px; }
+        .form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+        .form-row .field { flex: 1; min-width: 180px; }
+        .form-row label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .form-row input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        .btn { padding: 9px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; color: #fff; }
+        .btn-primary { background: #333; }
+        .btn-primary:hover { background: #555; }
+        .btn-danger { background: #dc3545; }
+        .btn-danger:hover { background: #c82333; }
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #5a6268; }
+        .btn-sm { padding: 5px 12px; font-size: 13px; }
+        .actions { display: flex; gap: 6px; }
+        .status-active { color: #28a745; font-weight: bold; }
+        .status-inactive { color: #dc3545; font-weight: bold; }
+        .msg { padding: 10px 16px; border-radius: 4px; margin-bottom: 16px; display: none; font-size: 14px; }
+        .msg-success { background: #d4edda; color: #155724; }
+        .msg-error { background: #f8d7da; color: #721c24; }
+
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #28a745;
+            border-radius: 50%;
+            margin-left: 10px;
+            vertical-align: middle;
+            animation: livePulse 5s ease-in-out infinite;
+        }
+        @keyframes livePulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+            10% { transform: scale(1.5); box-shadow: 0 0 12px 5px rgba(40, 167, 69, 0.5); }
+            20% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Admin Dashboard<span class="live-indicator"></span></h1>
+        <div>
+            <nav style="display:inline;">
+                <a href="/overview.html">Overview</a>
+                <a href="/dashboard.html">Sessions</a>
+                <a href="/agents.html" class="active">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/staff-assignator.html">Assignator</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div id="message" class="msg"></div>
+
+    <div class="form-section">
+        <h2 id="form-title">Create Agent</h2>
+        <div class="form-row">
+            <div class="field">
+                <label for="agent-email">Email</label>
+                <input type="email" id="agent-email" placeholder="agent@example.com" required>
+            </div>
+            <div class="field">
+                <label for="agent-password">Password</label>
+                <input type="password" id="agent-password" placeholder="Password">
+            </div>
+            <div class="field">
+                <label for="agent-name">Name</label>
+                <input type="text" id="agent-name" placeholder="Agent name">
+            </div>
+            <div class="field">
+                <label for="agent-fitstn-id">Fitstn ID</label>
+                <input type="text" id="agent-fitstn-id" placeholder="Supabase staff UUID">
+            </div>
+        </div>
+        <div class="form-row" style="margin-top: 12px;">
+            <div class="field" style="max-width: 160px;">
+                <label for="agent-shift-start">Shift Start Time</label>
+                <input type="time" id="agent-shift-start" placeholder="11:00">
+            </div>
+            <div class="field" style="max-width: 160px;">
+                <label for="agent-shift-end">Shift End Time</label>
+                <input type="time" id="agent-shift-end" placeholder="19:00">
+            </div>
+            <div class="field" style="max-width: 160px;">
+                <label for="agent-sla-cutoff">SLA Cutoff Time</label>
+                <input type="time" id="agent-sla-cutoff" placeholder="18:00">
+            </div>
+            <div>
+                <button class="btn btn-primary" id="form-submit-btn" onclick="submitForm()">Create</button>
+                <button class="btn btn-secondary" id="form-cancel-btn" onclick="cancelEdit()" style="display:none;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Fitstn ID</th>
+                <th>Shift Start</th>
+                <th>Shift End</th>
+                <th>SLA Cutoff</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="agents-body">
+            <tr><td colspan="10" class="empty">Loading...</td></tr>
+        </tbody>
+    </table>
+
+    <script>
+        // Arabic date utilities
+        const ARABIC_MONTH_NAMES = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+        const ARABIC_DAY_NAMES = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+        function getArabicPeriod(h) { return h < 12 ? 'صباحاً' : 'مساءً'; }
+        function formatArabicTime(date) { const h = date.getHours(); return `${h % 12 || 12}:${String(date.getMinutes()).padStart(2,'0')} ${getArabicPeriod(h)}`; }
+        function formatArabicDateTime(date) { return `${ARABIC_DAY_NAMES[date.getDay()]} ${date.getDate()} ${ARABIC_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()} - الساعة ${formatArabicTime(date)}`; }
+
+        const token = localStorage.getItem('adminToken');
+        if (!token) { window.location.href = '/'; }
+
+        let editingId = null;
+
+        function formatTime(timeStr) {
+            if (!timeStr) return '-';
+            const [hours, minutes] = timeStr.split(':');
+            const hour = parseInt(hours, 10);
+            const period = getArabicPeriod(hour);
+            const displayHour = hour % 12 || 12;
+            return displayHour + ':' + minutes + ' ' + period;
+        }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) { localStorage.removeItem('adminToken'); window.location.href = '/'; }
+                return res;
+            });
+        }
+
+        function logout() {
+            authFetch('/api/admin/logout', { method: 'POST' });
+            localStorage.removeItem('adminToken');
+            window.location.href = '/';
+        }
+
+        function showMsg(text, type) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = 'msg msg-' + type;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 4000);
+        }
+
+        async function loadAgents() {
+            const tbody = document.getElementById('agents-body');
+            try {
+                const res = await authFetch('/api/agents');
+                const data = await res.json();
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="empty">No agents yet. Create one above.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.map(a => `
+                    <tr>
+                        <td>${a.id}</td>
+                        <td>${a.email}</td>
+                        <td>${a.name || '-'}</td>
+                        <td style="font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${a.fitstn_id || ''}">${a.fitstn_id || '-'}</td>
+                        <td>${formatTime(a.shift_start_time)}</td>
+                        <td>${formatTime(a.shift_end_time)}</td>
+                        <td>${formatTime(a.sla_cutoff_time)}</td>
+                        <td><span class="${a.is_active ? 'status-active' : 'status-inactive'}">${a.is_active ? 'Active' : 'Inactive'}</span></td>
+                        <td>${formatArabicDateTime(new Date(a.created_at))}</td>
+                        <td class="actions">
+                            <button class="btn btn-primary btn-sm" onclick="startEdit(${a.id}, '${a.email.replace(/'/g, "\\'")}', '${(a.name || '').replace(/'/g, "\\'")}', '${(a.fitstn_id || '').replace(/'/g, "\\'")}', '${a.shift_start_time || ''}', '${a.shift_end_time || ''}', '${a.sla_cutoff_time || ''}')">Edit</button>
+                            ${a.is_active
+                                ? `<button class="btn btn-danger btn-sm" onclick="deleteAgent(${a.id})">Deactivate</button>`
+                                : `<button class="btn btn-secondary btn-sm" onclick="reactivateAgent(${a.id})">Reactivate</button>`
+                            }
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="10" class="empty">Failed to load agents.</td></tr>';
+            }
+        }
+
+        async function submitForm() {
+            const email = document.getElementById('agent-email').value.trim();
+            const password = document.getElementById('agent-password').value;
+            const name = document.getElementById('agent-name').value.trim();
+            const fitstn_id = document.getElementById('agent-fitstn-id').value.trim();
+            const shift_start_time = document.getElementById('agent-shift-start').value || null;
+            const shift_end_time = document.getElementById('agent-shift-end').value || null;
+            const sla_cutoff_time = document.getElementById('agent-sla-cutoff').value || null;
+
+            if (!email) { showMsg('Email is required', 'error'); return; }
+
+            if (editingId) {
+                // Update
+                const body = { email, name, fitstn_id, shift_start_time, shift_end_time, sla_cutoff_time };
+                if (password) body.password = password;
+                try {
+                    const res = await authFetch('/api/agents/' + editingId, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error);
+                    showMsg('Agent updated successfully', 'success');
+                    cancelEdit();
+                    loadAgents();
+                } catch (err) {
+                    showMsg(err.message || 'Failed to update agent', 'error');
+                }
+            } else {
+                // Create
+                if (!password) { showMsg('Password is required for new agents', 'error'); return; }
+                try {
+                    const res = await authFetch('/api/agents', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password, name, fitstn_id, shift_start_time, shift_end_time, sla_cutoff_time })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error);
+                    showMsg('Agent created successfully', 'success');
+                    document.getElementById('agent-email').value = '';
+                    document.getElementById('agent-password').value = '';
+                    document.getElementById('agent-name').value = '';
+                    document.getElementById('agent-fitstn-id').value = '';
+                    document.getElementById('agent-shift-start').value = '';
+                    document.getElementById('agent-shift-end').value = '';
+                    document.getElementById('agent-sla-cutoff').value = '';
+                    loadAgents();
+                } catch (err) {
+                    showMsg(err.message || 'Failed to create agent', 'error');
+                }
+            }
+        }
+
+        function startEdit(id, email, name, fitst_id, shiftStart, shiftEnd, slaCutoff) {
+            editingId = id;
+            document.getElementById('agent-email').value = email;
+            document.getElementById('agent-password').value = '';
+            document.getElementById('agent-name').value = name;
+            document.getElementById('agent-fitstn-id').value = fitst_id || '';
+            document.getElementById('agent-shift-start').value = shiftStart || '';
+            document.getElementById('agent-shift-end').value = shiftEnd || '';
+            document.getElementById('agent-sla-cutoff').value = slaCutoff || '';
+            document.getElementById('form-title').textContent = 'Edit Agent #' + id;
+            document.getElementById('form-submit-btn').textContent = 'Update';
+            document.getElementById('form-cancel-btn').style.display = 'inline-block';
+            document.getElementById('agent-password').placeholder = 'Leave blank to keep current';
+        }
+
+        function cancelEdit() {
+            editingId = null;
+            document.getElementById('agent-email').value = '';
+            document.getElementById('agent-password').value = '';
+            document.getElementById('agent-name').value = '';
+            document.getElementById('agent-fitstn-id').value = '';
+            document.getElementById('agent-shift-start').value = '';
+            document.getElementById('agent-shift-end').value = '';
+            document.getElementById('agent-sla-cutoff').value = '';
+            document.getElementById('form-title').textContent = 'Create Agent';
+            document.getElementById('form-submit-btn').textContent = 'Create';
+            document.getElementById('form-cancel-btn').style.display = 'none';
+            document.getElementById('agent-password').placeholder = 'Password';
+        }
+
+        async function deleteAgent(id) {
+            if (!confirm('Deactivate this agent? They will be logged out immediately.')) return;
+            try {
+                const res = await authFetch('/api/agents/' + id, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showMsg('Agent deactivated', 'success');
+                loadAgents();
+            } catch (err) {
+                showMsg(err.message || 'Failed to deactivate agent', 'error');
+            }
+        }
+
+        async function reactivateAgent(id) {
+            try {
+                const res = await authFetch('/api/agents/' + id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: true })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showMsg('Agent reactivated', 'success');
+                loadAgents();
+            } catch (err) {
+                showMsg(err.message || 'Failed to reactivate agent', 'error');
+            }
+        }
+
+        loadAgents();
+    </script>
+</body>
+</html>
