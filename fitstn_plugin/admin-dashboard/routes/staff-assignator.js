@@ -18,7 +18,7 @@ module.exports = function (requireAdmin) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     // ── Staff mapping data ──
-    const STAFF_DATA_PATH = path.resolve(__dirname, "..", "staff_data.json");
+    const STAFF_DATA_PATH = path.resolve(__dirname, "..", "constants", "staff_data.json");
     function loadStaffData() {
         return JSON.parse(fs.readFileSync(STAFF_DATA_PATH, "utf8"));
     }
