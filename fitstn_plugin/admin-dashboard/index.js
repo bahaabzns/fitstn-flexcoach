@@ -99,7 +99,7 @@ const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin)
 app.use(cors({ origin: "*", allowedHeaders: ["Content-Type", "Authorization"] }));
 app.use(express.json());
 app.use(express.text());
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(path.join(__dirname, "public")));
 
 // Mount auth and CRUD routes
 app.use("/api/admin", adminAuthRoutes);
@@ -112,7 +112,7 @@ app.use("/api", activityEventRoutes);
 app.use("/api/staff-assignator", staffAssignatorRoutes);
 
 app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "login.html"));
+    res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
 app.get("/api/overview", requireAdmin, async (req, res) => {
