@@ -200,6 +200,7 @@
         }
 
         const EVENTS_PER_PAGE = 100;
+        const AUTO_REFRESH_MS = 5000;
         let currentPage = 0;
         let currentTotal = 0;
         let currentPeriod = 'month';
@@ -447,7 +448,7 @@
         document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);
         loadAgentList();
         loadEvents();
-        setInterval(loadEvents, 5000);
+        setInterval(loadEvents, AUTO_REFRESH_MS);
     </script>
 </body>
 </html>
