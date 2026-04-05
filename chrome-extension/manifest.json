@@ -4,7 +4,7 @@
   "version": "1.1",
   "description": "Adds click handlers to chats on FlexCoach dashboard",
   "permissions": ["tabs", "storage", "alarms"],
-  "host_permissions": ["https://fitstn-flexcoach.onrender.com/*"],
+  "host_permissions": ["https://fitstn-flexcoach.onrender.com/*", "http://localhost:3000/*"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "FlexCoach Agent"
@@ -15,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["https://fitstn.flexcoach.app/*"],
-      "js": ["content.js"],
+      "js": ["config.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

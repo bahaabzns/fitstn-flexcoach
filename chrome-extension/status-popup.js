@@ -1,4 +1,4 @@
-const API_BASE = "https://fitstn-flexcoach.onrender.com";
+// API_BASE is defined in config.js
 const statusBadge = document.getElementById("status-badge");
 const statusDetail = document.getElementById("status-detail");
 const statusContainer = document.getElementById("status-container");

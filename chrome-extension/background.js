@@ -1,3 +1,5 @@
+importScripts("config.js");
+
 const CHAT_URL_PATTERN = "https://fitstn.flexcoach.app/dashboard/chat";
 const trackedTabs = new Set();
 
@@ -12,7 +14,7 @@ function getToken() {
 async function closeSession() {
     const token = await getToken();
     if (!token) return;
-    fetch("https://fitstn-flexcoach.onrender.com/api/close-session", {
+    fetch(API_BASE + "/api/close-session", {
         method: "POST",
         headers: { Authorization: "Bearer " + token },
     }).catch(() => {});

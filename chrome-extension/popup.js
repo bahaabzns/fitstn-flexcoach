@@ -1,4 +1,4 @@
-const API_BASE = "https://fitstn-flexcoach.onrender.com";
+// API_BASE is defined in config.js
 
 const loginSection = document.getElementById("login-section");
 const signedInSection = document.getElementById("signed-in-section");
