@@ -833,6 +833,12 @@ function attachClickHandlers() {
             chat.addEventListener("click", function handleClick() {
                 if (!currentToken) return;
 
+                // Block session start while on break
+                if (currentStatus === "on_break") {
+                    showBreakError("You are on break — resume your shift first");
+                    return;
+                }
+
                 isChatClickInFlight = true;
                 showSessionPopup();
 
