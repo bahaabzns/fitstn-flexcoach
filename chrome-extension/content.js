@@ -264,6 +264,7 @@ function createStatusBadge() {
         <div id="fc-actions" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-left:1px solid #334155;">
             <button id="fc-btn-shift" style="padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#22c55e; color:#fff; white-space:nowrap;">Start Shift</button>
             <button id="fc-btn-break" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#6366f1; color:#fff; white-space:nowrap;">Take Break</button>
+            <button id="fc-btn-off-session" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#f59e0b; color:#fff; white-space:nowrap;">Off-session work</button>
             <button id="fc-btn-reopen" style="display:none; padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; background:#f59e0b; color:#fff; white-space:nowrap;">Reopen Shift</button>
             <button id="fc-btn-overview" style="padding:6px 14px; border:1px solid #475569; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:transparent; color:#cbd5e1; white-space:nowrap;">My Overview</button>
             <button id="fc-btn-signout" style="padding:6px 14px; border:1px solid #7f1d1d; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; background:#991b1b; color:#fca5a5; white-space:nowrap;">Sign Out</button>
@@ -282,6 +283,7 @@ function createStatusBadge() {
     // Attach click listeners directly (inline onclick is blocked by page CSP)
     document.getElementById("fc-btn-shift").addEventListener("click", handleShiftToggle);
     document.getElementById("fc-btn-break").addEventListener("click", handleBreakToggle);
+    document.getElementById("fc-btn-off-session").addEventListener("click", handleOffSessionWork);
     document.getElementById("fc-btn-reopen").addEventListener("click", handleReopenShift);
     document.getElementById("fc-btn-overview").addEventListener("click", handleOpenOverview);
     document.getElementById("fc-btn-signout").addEventListener("click", handleSignOut);
@@ -503,6 +505,39 @@ async function handleBreakToggle() {
     }
 }
 
+async function handleOffSessionWork() {
+    if (!currentToken) return;
+    const btn = document.getElementById("fc-btn-off-session");
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+
+    try {
+        await closeSessionViaApi();
+        hideSessionPopup();
+        updateStatusBadge();
+        showOffSessionToast("Session closed — you are now off-session");
+    } catch (err) {
+        showBreakError("Failed to close session — check your connection");
+    } finally {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+    }
+}
+
+function showOffSessionToast(message) {
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        background: #f59e0b; color: #1e293b; padding: 12px 24px; border-radius: 8px;
+        font-family: Arial, sans-serif; font-size: 14px; z-index: 99999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-weight: 600;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
 function showBreakError(message) {
     const toast = document.createElement("div");
     toast.style.cssText = `
@@ -547,6 +582,7 @@ function updateActionButtons(isSignedIn, isOnShift, isOnBreak) {
     const actionsContainer = document.getElementById("fc-actions");
     const shiftBtn = document.getElementById("fc-btn-shift");
     const breakBtn = document.getElementById("fc-btn-break");
+    const offSessionBtn = document.getElementById("fc-btn-off-session");
     const reopenBtn = document.getElementById("fc-btn-reopen");
     if (!actionsContainer) return;
 
@@ -587,6 +623,12 @@ function updateActionButtons(isSignedIn, isOnShift, isOnBreak) {
         } else {
             breakBtn.style.display = "none";
         }
+    }
+
+    // Show Off-session work button only when on shift, not on break, and in an active session
+    if (offSessionBtn) {
+        const hasActiveSession = currentStatus === "in_session";
+        offSessionBtn.style.display = (isOnShift && !isOnBreak && hasActiveSession) ? "inline-block" : "none";
     }
 
     // Hide Reopen button when back on shift
