@@ -8,7 +8,7 @@
 
 | Date | Feature/Change | Blockers Found | Fixed? |
 |------|---------------|----------------|--------|
-| *(none yet)* | | | |
+| 2026-04-05 | Agent status differentiation (in_session/between_sessions/idle) | 1 — `isAgentSignedInAndOnShift()` still referenced old `"active"` status | Yes — fixed before commit |
 
 ---
 
