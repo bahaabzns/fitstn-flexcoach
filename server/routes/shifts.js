@@ -277,7 +277,7 @@ module.exports = function (sql, requireAgent) {
                 const totalBreakSeconds = completedBreakSeconds;
                 const idleSeconds = Math.max(0, shiftDurationSeconds - totalActiveSeconds - totalBreakSeconds);
                 return res.json({
-                    status: "active",
+                    status: "in_session",
                     chat_name: session[0].chat_name,
                     shift_started_at: shiftStartedAt,
                     shift_duration_seconds: shiftDurationSeconds,
@@ -288,7 +288,7 @@ module.exports = function (sql, requireAgent) {
                 });
             }
 
-            // Idle: on shift but no active session and not on break
+            // No active session — determine between_sessions vs idle using activity threshold from settings
             const lastSession = await sql`
                 SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - ended_at)))::int AS idle_since_seconds
                 FROM sessions
@@ -298,10 +298,18 @@ module.exports = function (sql, requireAgent) {
             const idleSinceSeconds = lastSession.length > 0
                 ? Math.min(lastSession[0].idle_since_seconds, shiftDurationSeconds)
                 : shiftDurationSeconds;
+
+            // Fetch activity threshold (idle_warning_minutes) from settings
+            const thresholdRow = await sql`
+                SELECT value FROM settings WHERE key = 'idle_warning_minutes'
+            `;
+            const activityThresholdSeconds = (parseInt(thresholdRow[0]?.value) || 5) * 60;
+
+            const isIdle = idleSinceSeconds >= activityThresholdSeconds;
             const totalBreakSeconds = completedBreakSeconds;
             const idleSeconds = Math.max(0, shiftDurationSeconds - completedActiveSeconds - totalBreakSeconds);
             return res.json({
-                status: "idle",
+                status: isIdle ? "idle" : "between_sessions",
                 shift_started_at: shiftStartedAt,
                 shift_duration_seconds: shiftDurationSeconds,
                 idle_since_seconds: idleSinceSeconds,

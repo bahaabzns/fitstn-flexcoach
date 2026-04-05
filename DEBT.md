@@ -16,3 +16,4 @@
 | 7 | MEDIUM | No refresh token mechanism — auth tokens lack proper lifecycle | server/middleware/auth.js | 2026-04-05 | OPEN |
 | 8 | LOW | Inconsistent error response patterns across routes | server/routes/*.js | 2026-04-05 | OPEN |
 | 9 | LOW | No intermediate roles (e.g., supervisor) — only admin/agent | server/middleware/auth.js | 2026-04-05 | OPEN |
+| 10 | MEDIUM | Extra DB query for `idle_warning_minutes` on every agent status poll (every 5s per agent) — should cache in memory | server/routes/shifts.js | 2026-04-05 | OPEN |

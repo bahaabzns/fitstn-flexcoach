@@ -153,6 +153,11 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 (EXISTS (SELECT 1 FROM shifts sh WHERE sh.agent_id = a.id AND sh.shift_ended_at IS NULL)) DESC,
                 a.name ASC
         `;
+
+        // Fetch activity threshold from settings
+        const thresholdRow = await sql`SELECT value FROM settings WHERE key = 'idle_warning_minutes'`;
+        const activityThresholdSeconds = (parseInt(thresholdRow[0]?.value) || 5) * 60;
+
         const rows = result.map(row => {
             const onShift = !!row.shift_id;
             const hasActiveChat = !!row.current_session_id;
@@ -164,12 +169,14 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
             } else if (hasActiveBreak) {
                 status = "on_break";
             } else if (hasActiveChat) {
-                status = "active";
+                status = "in_session";
             } else {
-                status = "idle";
+                // Determine between_sessions vs idle using activity threshold
                 const lastEnded = row.last_session_ended_at ? new Date(row.last_session_ended_at) : null;
                 const shiftStart = new Date(row.shift_started_at);
                 idle_since = (lastEnded && lastEnded > shiftStart ? lastEnded : shiftStart).toISOString();
+                const idleSinceSeconds = Math.round((Date.now() - new Date(idle_since).getTime()) / 1000);
+                status = idleSinceSeconds >= activityThresholdSeconds ? "idle" : "between_sessions";
             }
 
             let shift_idle_seconds = null;

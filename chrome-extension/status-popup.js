@@ -4,7 +4,7 @@ const statusDetail = document.getElementById("status-detail");
 const statusContainer = document.getElementById("status-container");
 const notSignedIn = document.getElementById("not-signed-in");
 
-const statusLabels = { active: "Active", idle: "Idle", off_shift: "Off Shift" };
+const statusLabels = { in_session: "In Session", between_sessions: "Between Sessions", idle: "Idle", off_shift: "Off Shift" };
 
 function formatDuration(seconds) {
     if (seconds < 0) seconds = 0;
@@ -35,13 +35,15 @@ async function loadStatus() {
         statusBadge.textContent = statusLabels[data.status] || data.status;
         statusBadge.className = "status-indicator status-" + data.status;
 
-        if (data.status === "active") {
+        if (data.status === "in_session") {
             const chatSec = Math.round((Date.now() - new Date(data.chat_started_at).getTime()) / 1000);
             statusDetail.textContent = "In chat: " + (data.chat_name || "Unknown") + " (" + formatDuration(chatSec) + ")";
             statusDetail.style.display = "block";
+        } else if (data.status === "between_sessions") {
+            statusDetail.textContent = "Between sessions for " + formatDuration(data.idle_since_seconds || 0);
+            statusDetail.style.display = "block";
         } else if (data.status === "idle") {
-            const idleSec = Math.round((Date.now() - new Date(data.idle_since).getTime()) / 1000);
-            statusDetail.textContent = "Idle for " + formatDuration(idleSec);
+            statusDetail.textContent = "Idle for " + formatDuration(data.idle_since_seconds || 0);
             statusDetail.style.display = "block";
         } else {
             statusDetail.style.display = "none";

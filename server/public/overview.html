@@ -24,8 +24,9 @@
             min-width: 260px; flex: 1 1 280px; max-width: 400px;
             border-left: 4px solid #ccc;
         }
-        .agent-card.status-active { border-left-color: #28a745; }
-        .agent-card.status-idle { border-left-color: #ffc107; }
+        .agent-card.status-in_session { border-left-color: #28a745; }
+        .agent-card.status-between_sessions { border-left-color: #ffc107; }
+        .agent-card.status-idle { border-left-color: #dc3545; }
         .agent-card.status-on_break { border-left-color: #6366f1; background: #f0f0ff; }
         .agent-card.idle-warning { border-left-color: #fd7e14; background: #fff8f0; }
         .agent-card.idle-critical { border-left-color: #dc3545; background: #fff5f5; animation: pulse 2s infinite; }
@@ -45,8 +46,9 @@
         .idle-alert-banner.critical { background: #dc3545; }
 
         .status-badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: bold; color: #fff; text-transform: uppercase; }
-        .status-badge.active { background: #28a745; }
-        .status-badge.idle { background: #ffc107; color: #333; }
+        .status-badge.in_session { background: #28a745; }
+        .status-badge.between_sessions { background: #ffc107; color: #333; }
+        .status-badge.idle { background: #dc3545; }
         .status-badge.off_shift { background: #6c757d; }
         .status-badge.idle-warning { background: #fd7e14; color: #fff; }
         .status-badge.idle-critical { background: #dc3545; color: #fff; }
@@ -445,7 +447,7 @@
         // =====================
         // LIVE OVERVIEW (admin only)
         // =====================
-        const statusLabels = { active: 'Active', idle: 'Idle', on_break: 'On Break', off_shift: 'Off Shift' };
+        const statusLabels = { in_session: 'In Session', between_sessions: 'Between Sessions', idle: 'Idle', on_break: 'On Break', off_shift: 'Off Shift' };
         let thresholdsCache = { warning: 5 * 60, critical: 10 * 60, maxSession: 30 * 60 };
 
         async function fetchThresholds() {
@@ -487,7 +489,7 @@
                     let idleClass = '';
                     let badgeClass = agent.status;
 
-                    if (agent.status === 'active') {
+                    if (agent.status === 'in_session') {
                         const chatSec = Math.round((Date.now() - new Date(agent.current_chat_started_at).getTime()) / 1000);
                         const exceeded = chatSec >= thresholdsCache.maxSession;
                         if (exceeded) {
@@ -499,18 +501,17 @@
                             <div class="card-detail"><strong>Chat:</strong> ${agent.current_chat_name || 'Unknown'}</div>
                             <div class="card-detail${exceeded ? ' session-exceeded-text' : ''}"><strong>In chat for:</strong> ${formatDuration(chatSec)}${exceeded ? ' (exceeded!)' : ''}</div>
                         `;
+                    } else if (agent.status === 'between_sessions') {
+                        const idleSec = Math.round((Date.now() - new Date(agent.idle_since).getTime()) / 1000);
+                        detailsHtml = `<div class="card-detail"><strong>Between sessions for:</strong> ${formatDuration(idleSec)}</div>`;
                     } else if (agent.status === 'idle') {
                         const idleSec = Math.round((Date.now() - new Date(agent.idle_since).getTime()) / 1000);
                         const agentLabel = agent.name || agent.email;
-                        const { warning: IDLE_WARNING_SEC, critical: IDLE_CRITICAL_SEC } = getThresholds();
+                        const { critical: IDLE_CRITICAL_SEC } = getThresholds();
                         if (idleSec >= IDLE_CRITICAL_SEC) {
                             idleClass = ' idle-critical';
                             badgeClass = 'idle-critical';
                             criticalAgents.push(agentLabel);
-                        } else if (idleSec >= IDLE_WARNING_SEC) {
-                            idleClass = ' idle-warning';
-                            badgeClass = 'idle-warning';
-                            warningAgents.push(agentLabel);
                         }
                         detailsHtml = `<div class="card-detail"><strong>Idle for:</strong> ${formatDuration(idleSec)}</div>`;
                     } else if (agent.status === 'on_break') {

@@ -22,6 +22,7 @@ let idleSinceTimestamp = null;
 let idleCheckTimer = null;
 let currentSessionId = null;
 let mouseMoveDebounceTimer = null;
+let isChatClickInFlight = false;
 
 const isChatPage = location.pathname.startsWith("/dashboard/chat");
 
@@ -86,7 +87,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 /* ───────── Helpers ───────── */
 
 function isAgentSignedInAndOnShift() {
-    return currentToken && (currentStatus === "active" || currentStatus === "idle" || currentStatus === "on_break");
+    return currentToken && (currentStatus === "in_session" || currentStatus === "between_sessions" || currentStatus === "idle" || currentStatus === "on_break");
 }
 
 function closeSessionViaApi() {
@@ -202,13 +203,14 @@ document.addEventListener("visibilitychange", () => {
 
 /* ───────── Agent Status Badge (top-right corner) ───────── */
 
-const STATUS_LABELS = { active: "Active", idle: "Idle", on_break: "On Break", off_shift: "Off Shift", not_signed_in: "Not Signed In" };
+const STATUS_LABELS = { in_session: "In Session", between_sessions: "Between Sessions", idle: "Idle", on_break: "On Break", off_shift: "Off Shift", not_signed_in: "Not Signed In" };
 const STATUS_COLORS = {
-    active:        { bg: "#dcfce7", border: "#22c55e", text: "#15803d", dot: "#22c55e" },
-    idle:          { bg: "#fef9c3", border: "#eab308", text: "#a16207", dot: "#eab308" },
-    on_break:      { bg: "#e0e7ff", border: "#6366f1", text: "#4338ca", dot: "#6366f1" },
-    off_shift:     { bg: "#f3f4f6", border: "#9ca3af", text: "#6b7280", dot: "#9ca3af" },
-    not_signed_in: { bg: "#fee2e2", border: "#ef4444", text: "#b91c1c", dot: "#ef4444" },
+    in_session:        { bg: "#dcfce7", border: "#22c55e", text: "#15803d", dot: "#22c55e" },
+    between_sessions:  { bg: "#fef9c3", border: "#eab308", text: "#a16207", dot: "#eab308" },
+    idle:              { bg: "#fee2e2", border: "#ef4444", text: "#b91c1c", dot: "#ef4444" },
+    on_break:          { bg: "#e0e7ff", border: "#6366f1", text: "#4338ca", dot: "#6366f1" },
+    off_shift:         { bg: "#f3f4f6", border: "#9ca3af", text: "#6b7280", dot: "#9ca3af" },
+    not_signed_in:     { bg: "#fee2e2", border: "#ef4444", text: "#b91c1c", dot: "#ef4444" },
 };
 
 function formatStatusDuration(seconds) {
@@ -617,11 +619,14 @@ async function updateStatusBadge() {
         label.style.color = colors.text;
         label.textContent = STATUS_LABELS[data.status] || data.status;
 
-        if (data.status === "active") {
+        if (data.status === "in_session") {
             detail.textContent = (data.chat_name || "Unknown") + " · " + formatStatusDuration(data.chat_duration_seconds || 0);
             detail.style.display = "inline";
-        } else if (data.status === "idle") {
+        } else if (data.status === "between_sessions") {
             detail.textContent = "Between sessions for " + formatStatusDuration(data.idle_since_seconds || 0);
+            detail.style.display = "inline";
+        } else if (data.status === "idle") {
+            detail.textContent = "Idle for " + formatStatusDuration(data.idle_since_seconds || 0);
             detail.style.display = "inline";
         } else if (data.status === "on_break") {
             detail.textContent = "Break for " + formatStatusDuration(data.current_break_seconds || 0);
@@ -634,10 +639,10 @@ async function updateStatusBadge() {
         const sessionCard = getSessionCard();
         const isSessionVisible = sessionCard && sessionCard.style.display !== "none";
 
-        if (data.status === "active" && !isSessionVisible && isChatPage) {
+        if (data.status === "in_session" && !isSessionVisible && isChatPage) {
             showSessionPopup(data.chat_duration_seconds || 0);
             if (!currentSessionId) startIdleDetection();
-        } else if (data.status !== "active" && isSessionVisible) {
+        } else if (data.status !== "in_session" && isSessionVisible && !isChatClickInFlight) {
             hideSessionPopup();
         }
 
@@ -786,6 +791,7 @@ function attachClickHandlers() {
             chat.addEventListener("click", function handleClick() {
                 if (!currentToken) return;
 
+                isChatClickInFlight = true;
                 showSessionPopup();
 
                 // Wait for the chat header to load, then extract name + code
@@ -804,9 +810,13 @@ function attachClickHandlers() {
                         .then((data) => {
                             console.log("Chat click saved:", data);
                             currentSessionId = data.data?.id || null;
+                            isChatClickInFlight = false;
                             startIdleDetection();
                         })
-                        .catch((err) => console.error("Failed to save chat click:", err));
+                        .catch((err) => {
+                            console.error("Failed to save chat click:", err);
+                            isChatClickInFlight = false;
+                        });
                 }, 500);
             });
             chat.dataset.handlerAttached = "true";
