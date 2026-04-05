@@ -76,6 +76,7 @@
                 <a href="/dashboard.html">Sessions</a>
                 <a href="/agents.html">Agents</a>
                 <a href="/shifts.html" class="active">Shifts</a>
+                <a href="/activity-log.html">Activity Log</a>
                 <a href="/salaries.html">Salaries</a>
                 <a href="/staff-assignator.html">Assignator</a>
                 <a href="/settings.html">Settings</a>
@@ -108,16 +109,29 @@
                 <th>Agent</th>
                 <th>Started At</th>
                 <th>Ended At</th>
-                <th>Duration</th>
-                <th>Break</th>
+                <th>Total Duration</th>
+                <th>In-session</th>
                 <th>Off-session work</th>
+                <th>Idle</th>
+                <th>Break</th>
                 <th>Status</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody id="shifts-body">
-            <tr><td colspan="9" class="empty">Loading...</td></tr>
+            <tr><td colspan="11" class="empty">Loading...</td></tr>
         </tbody>
+        <tfoot id="shifts-totals" style="display:none;">
+            <tr style="background:#f0f0f0; font-weight:bold;">
+                <td colspan="4" style="text-align:right;">Totals</td>
+                <td id="total-duration">-</td>
+                <td id="total-in-session">-</td>
+                <td id="total-off-session">-</td>
+                <td id="total-idle">-</td>
+                <td id="total-break">-</td>
+                <td colspan="2"></td>
+            </tr>
+        </tfoot>
     </table>
     <script>
         // Arabic date utilities
@@ -184,16 +198,36 @@
                 renderPeriodLabel(response.period);
                 const data = response.shifts;
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="empty">No shifts for this period.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="11" class="empty">No shifts for this period.</td></tr>';
+                    document.getElementById('shifts-totals').style.display = 'none';
                     return;
                 }
+
+                let sumDuration = 0, sumActive = 0, sumOffSession = 0, sumIdle = 0, sumBreak = 0;
+
                 tbody.innerHTML = data.map(row => {
                     const isActive = !row.shift_ended_at;
-                    const duration = isActive
-                        ? formatDuration(Math.round((Date.now() - new Date(row.shift_started_at).getTime()) / 1000))
-                        : formatDuration(row.duration_seconds);
-                    const breakDuration = row.break_seconds != null ? formatDuration(row.break_seconds) : '-';
-                    const idleDuration = row.idle_seconds != null ? formatDuration(row.idle_seconds) : '-';
+                    const grossSeconds = isActive
+                        ? Math.round((Date.now() - new Date(row.shift_started_at).getTime()) / 1000)
+                        : row.duration_seconds || 0;
+                    const duration = formatDuration(grossSeconds);
+                    const activeSeconds = row.active_seconds || 0;
+                    const breakSeconds = row.break_seconds || 0;
+                    const idleSeconds = row.idle_seconds || 0;
+                    const offSessionSeconds = row.off_session_seconds != null
+                        ? row.off_session_seconds
+                        : Math.max(0, grossSeconds - activeSeconds - breakSeconds - idleSeconds);
+
+                    sumDuration += grossSeconds;
+                    sumActive += activeSeconds;
+                    sumBreak += breakSeconds;
+                    sumIdle += idleSeconds;
+                    sumOffSession += offSessionSeconds;
+
+                    const inSession = formatDuration(activeSeconds);
+                    const offSessionDisplay = offSessionSeconds > 0 ? formatDuration(offSessionSeconds) : '-';
+                    const idleDisplay = idleSeconds > 0 ? formatDuration(idleSeconds) : '-';
+                    const breakDuration = breakSeconds > 0 ? formatDuration(breakSeconds) : '-';
                     const startedIso = new Date(row.shift_started_at).toISOString().slice(0, 16);
                     const endedIso = row.shift_ended_at ? new Date(row.shift_ended_at).toISOString().slice(0, 16) : '';
                     return `
@@ -203,15 +237,25 @@
                             <td>${formatArabicDateTime(new Date(row.shift_started_at))}</td>
                             <td>${isActive ? "-" : formatArabicDateTime(new Date(row.shift_ended_at))}</td>
                             <td>${duration}</td>
+                            <td>${inSession}</td>
+                            <td>${offSessionDisplay}</td>
+                            <td>${idleDisplay}</td>
                             <td>${breakDuration}</td>
-                            <td>${idleDuration}</td>
                             <td><span class="badge ${isActive ? 'badge-active' : 'badge-ended'}">${isActive ? 'Active' : 'Ended'}</span></td>
                             <td><button class="btn-edit" onclick="openEditModal(${row.id}, '${startedIso}', '${endedIso}')">Edit</button></td>
                         </tr>
                     `;
                 }).join("");
+
+                // Render totals row
+                document.getElementById('shifts-totals').style.display = '';
+                document.getElementById('total-duration').textContent = formatDuration(sumDuration);
+                document.getElementById('total-in-session').textContent = formatDuration(sumActive);
+                document.getElementById('total-off-session').textContent = formatDuration(sumOffSession);
+                document.getElementById('total-idle').textContent = formatDuration(sumIdle);
+                document.getElementById('total-break').textContent = formatDuration(sumBreak);
             } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="9" class="empty">Failed to load shifts.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" class="empty">Failed to load shifts.</td></tr>';
             }
         }
         document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);

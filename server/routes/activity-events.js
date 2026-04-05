@@ -64,7 +64,21 @@ module.exports = function (sql, requireAgent, requireAdmin) {
             const agentId = req.query.agent_id ? parseInt(req.query.agent_id) : null;
             const eventType = req.query.event_type || null;
             const since = req.query.since || null;
+            const dateFrom = req.query.date_from || null;
+            const dateTo = req.query.date_to || null;
+            const offset = Math.max(0, parseInt(req.query.offset) || 0);
             const limit = Math.min(parseInt(req.query.limit) || DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+
+            const countResult = await sql`
+                SELECT COUNT(*)::int AS total
+                FROM activity_events ae
+                WHERE 1=1
+                    ${agentId ? sql`AND ae.agent_id = ${agentId}` : sql``}
+                    ${eventType ? sql`AND ae.event_type = ${eventType}` : sql``}
+                    ${since ? sql`AND ae.created_at > ${since}::timestamp` : sql``}
+                    ${dateFrom ? sql`AND ae.created_at >= ${dateFrom}::date` : sql``}
+                    ${dateTo ? sql`AND ae.created_at < ${dateTo}::date + INTERVAL '1 day'` : sql``}
+            `;
 
             const events = await sql`
                 SELECT
@@ -82,11 +96,14 @@ module.exports = function (sql, requireAgent, requireAdmin) {
                     ${agentId ? sql`AND ae.agent_id = ${agentId}` : sql``}
                     ${eventType ? sql`AND ae.event_type = ${eventType}` : sql``}
                     ${since ? sql`AND ae.created_at > ${since}::timestamp` : sql``}
+                    ${dateFrom ? sql`AND ae.created_at >= ${dateFrom}::date` : sql``}
+                    ${dateTo ? sql`AND ae.created_at < ${dateTo}::date + INTERVAL '1 day'` : sql``}
                 ORDER BY ae.created_at DESC
                 LIMIT ${limit}
+                OFFSET ${offset}
             `;
 
-            res.json({ events });
+            res.json({ events, total: countResult[0].total, limit, offset });
         } catch (err) {
             console.error("Error fetching activity events:", err.message);
             res.status(500).json({ error: "Failed to fetch activity events", details: err.message });

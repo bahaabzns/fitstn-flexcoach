@@ -322,7 +322,26 @@ module.exports = function (sql) {
                     ))), 0)::int
                     FROM shift_breaks sb
                     WHERE sb.shift_id = sh.id
-                    ) as break_seconds
+                    ) as break_seconds,
+                    (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
+                        LEAST(
+                            COALESCE(
+                                (SELECT MIN(ae2.created_at) FROM activity_events ae2
+                                 WHERE ae2.agent_id = sh.agent_id
+                                 AND ae2.event_type = 'idle_resumed'
+                                 AND ae2.created_at > ae_s.created_at
+                                 AND ae2.created_at <= COALESCE(sh.shift_ended_at, NOW())),
+                                COALESCE(sh.shift_ended_at, NOW())
+                            ),
+                            COALESCE(sh.shift_ended_at, NOW())
+                        ) - ae_s.created_at
+                    ))), 0)::int
+                    FROM activity_events ae_s
+                    WHERE ae_s.agent_id = sh.agent_id
+                    AND ae_s.event_type = 'idle_started'
+                    AND ae_s.created_at >= sh.shift_started_at
+                    AND ae_s.created_at < COALESCE(sh.shift_ended_at, NOW())
+                    ) as idle_event_seconds
                 FROM shifts sh
                 WHERE sh.agent_id = ${agentId}
                 AND sh.shift_started_at >= ${startDate}::date
@@ -330,11 +349,17 @@ module.exports = function (sql) {
                 ORDER BY sh.shift_started_at DESC
             `;
 
-            const shiftsWithIdle = shifts.map(sh => ({
-                ...sh,
-                break_seconds: sh.break_seconds || 0,
-                idle_seconds: Math.max(0, sh.duration_seconds - sh.active_seconds - (sh.break_seconds || 0))
-            }));
+            const shiftsWithIdle = shifts.map(sh => {
+                const breakSeconds = sh.break_seconds || 0;
+                const idleEventSeconds = Math.min(sh.idle_event_seconds || 0, Math.max(0, sh.duration_seconds - sh.active_seconds - breakSeconds));
+                const offSessionSeconds = Math.max(0, sh.duration_seconds - sh.active_seconds - breakSeconds - idleEventSeconds);
+                return {
+                    ...sh,
+                    break_seconds: breakSeconds,
+                    idle_seconds: idleEventSeconds,
+                    off_session_seconds: offSessionSeconds,
+                };
+            });
 
             res.json({ period: { type: period, start: startDate, end: endDate }, shifts: shiftsWithIdle });
         } catch (err) {

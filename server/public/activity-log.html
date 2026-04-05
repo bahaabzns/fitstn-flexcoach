@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Activity Log</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        h1 { color: #333; margin: 0; }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #333; color: #fff; }
+        tr:hover { background: #f9f9f9; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        nav a { margin-right: 20px; text-decoration: none; color: #555; font-weight: 500; }
+        nav a.active { color: #333; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 2px; }
+        .logout-btn { padding: 8px 16px; background: #dc3545; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+
+        .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+        .toolbar .field { min-width: 160px; }
+        .toolbar label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        .toolbar select, .toolbar input {
+            padding: 8px; border: 1px solid #ddd; border-radius: 4px;
+            font-size: 14px; min-width: 150px; box-sizing: border-box;
+        }
+        .period-toggle { display: flex; gap: 0; }
+        .period-toggle button {
+            padding: 8px 16px; border: 1px solid #ddd; background: #fff; cursor: pointer;
+            font-size: 13px; font-weight: 500; color: #555;
+        }
+        .period-toggle button:first-child { border-radius: 4px 0 0 4px; }
+        .period-toggle button:last-child { border-radius: 0 4px 4px 0; }
+        .period-toggle button.active { background: #333; color: #fff; border-color: #333; }
+        .period-label { font-size: 13px; color: #777; margin-bottom: 12px; }
+
+        .event-type-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 10px;
+            font-size: 11px; font-weight: bold; text-transform: uppercase;
+        }
+        .event-type-badge.session_started { background: #d4edda; color: #155724; }
+        .event-type-badge.session_ended { background: #e2e3e5; color: #383d41; }
+        .event-type-badge.message_sent { background: #cce5ff; color: #004085; }
+        .event-type-badge.shift_started { background: #d4edda; color: #155724; }
+        .event-type-badge.shift_ended { background: #e2e3e5; color: #383d41; }
+        .event-type-badge.shift_reopened { background: #fff3cd; color: #856404; }
+        .event-type-badge.shift_adjusted { background: #fff3cd; color: #856404; }
+        .event-type-badge.break_started { background: #e0cffc; color: #3d0a6e; }
+        .event-type-badge.break_resumed { background: #e0cffc; color: #3d0a6e; }
+        .event-type-badge.idle_started { background: #fff3cd; color: #856404; }
+        .event-type-badge.idle_resumed { background: #d4edda; color: #155724; }
+        .event-type-badge.tab_focus_lost { background: #ffe0cc; color: #7a3300; }
+        .event-type-badge.tab_focus_gained { background: #ccf2f6; color: #0c5460; }
+
+        .pagination { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 16px; }
+        .pagination button {
+            padding: 6px 14px; border: 1px solid #ddd; border-radius: 4px;
+            background: #fff; cursor: pointer; font-size: 13px; color: #333;
+        }
+        .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .pagination button.active { background: #333; color: #fff; border-color: #333; }
+        .pagination-info { font-size: 13px; color: #777; }
+
+        .summary-bar {
+            display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;
+        }
+        .summary-stat {
+            background: #fff; padding: 10px 18px; border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center;
+            min-width: 100px;
+        }
+        .summary-stat .label { font-size: 11px; color: #777; margin-bottom: 2px; }
+        .summary-stat .value { font-size: 18px; font-weight: bold; color: #333; }
+
+        .btn-clear {
+            padding: 8px 14px; border: 1px solid #ddd; border-radius: 4px;
+            background: #fff; cursor: pointer; font-size: 13px; color: #555;
+        }
+        .btn-clear:hover { background: #f0f0f0; }
+
+        .metadata-cell { font-size: 12px; color: #666; max-width: 200px; word-break: break-word; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Admin Dashboard</h1>
+        <div>
+            <nav style="display:inline;">
+                <a href="/overview.html">Overview</a>
+                <a href="/dashboard.html">Sessions</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/activity-log.html" class="active">Activity Log</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/staff-assignator.html">Assignator</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <div class="field">
+            <label for="filter-agent">Agent</label>
+            <select id="filter-agent" onchange="resetAndLoad()">
+                <option value="">All Agents</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="filter-event-type">Event Type</label>
+            <select id="filter-event-type" onchange="resetAndLoad()">
+                <option value="">All Types</option>
+                <option value="session_started">Session Started</option>
+                <option value="session_ended">Session Ended</option>
+                <option value="message_sent">Message Sent</option>
+                <option value="shift_started">Shift Started</option>
+                <option value="shift_ended">Shift Ended</option>
+                <option value="shift_reopened">Shift Reopened</option>
+                <option value="shift_adjusted">Shift Adjusted</option>
+                <option value="break_started">Break Started</option>
+                <option value="break_resumed">Break Resumed</option>
+                <option value="idle_started">Idle Started</option>
+                <option value="idle_resumed">Idle Resumed</option>
+                <option value="tab_focus_lost">Tab Focus Lost</option>
+                <option value="tab_focus_gained">Tab Focus Gained</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>Period</label>
+            <div class="period-toggle" id="period-toggle">
+                <button onclick="setPeriod('day')" data-period="day">Day</button>
+                <button onclick="setPeriod('week')" data-period="week">Week</button>
+                <button onclick="setPeriod('month')" data-period="month" class="active">Month</button>
+            </div>
+        </div>
+        <div class="field">
+            <label for="filter-date">Date</label>
+            <input type="date" id="filter-date" onchange="resetAndLoad()">
+        </div>
+        <div class="field" style="align-self: flex-end;">
+            <button class="btn-clear" onclick="clearFilters()">Clear Filters</button>
+        </div>
+    </div>
+    <div id="period-label" class="period-label"></div>
+
+    <div id="summary-bar" class="summary-bar"></div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Agent</th>
+                <th>Event Type</th>
+                <th>Description</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody id="events-body">
+            <tr><td colspan="5" class="empty">Loading...</td></tr>
+        </tbody>
+    </table>
+    <div id="pagination" class="pagination"></div>
+
+    <script>
+        const ARABIC_MONTH_NAMES = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+        const ARABIC_DAY_NAMES = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+        function getArabicPeriod(h) { return h < 12 ? 'صباحاً' : 'مساءً'; }
+        function formatArabicTime(date) { const h = date.getHours(); return `${h % 12 || 12}:${String(date.getMinutes()).padStart(2,'0')} ${getArabicPeriod(h)}`; }
+        function formatArabicTimeWithSeconds(date) { const h = date.getHours(); return `${h % 12 || 12}:${String(date.getMinutes()).padStart(2,'0')}:${String(date.getSeconds()).padStart(2,'0')} ${getArabicPeriod(h)}`; }
+        function formatArabicDateNoDay(date) { return `${date.getDate()} ${ARABIC_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`; }
+        function formatArabicDateTime(date) { return `${ARABIC_DAY_NAMES[date.getDay()]} ${date.getDate()} ${ARABIC_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()} - ${formatArabicTime(date)}`; }
+
+        const token = localStorage.getItem('adminToken');
+        if (!token) { window.location.href = '/'; }
+
+        function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+            return fetch(url, options).then(res => {
+                if (res.status === 401) { localStorage.removeItem('adminToken'); window.location.href = '/'; }
+                return res;
+            });
+        }
+
+        function logout() {
+            authFetch('/api/admin/logout', { method: 'POST' });
+            localStorage.removeItem('adminToken');
+            window.location.href = '/';
+        }
+
+        function formatDuration(seconds) {
+            if (seconds == null) return '-';
+            seconds = Math.round(seconds);
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (mins < 60) return mins + 'm ' + secs + 's';
+            const hours = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hours + 'h ' + remMins + 'm';
+        }
+
+        const EVENTS_PER_PAGE = 100;
+        let currentPage = 0;
+        let currentTotal = 0;
+        let currentPeriod = 'month';
+
+        function setPeriod(period) {
+            currentPeriod = period;
+            document.querySelectorAll('#period-toggle button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === period);
+            });
+            resetAndLoad();
+        }
+
+        function getDateRange(period, dateStr) {
+            const date = new Date(dateStr + 'T00:00:00');
+            let startDate, endDate;
+            if (period === 'day') {
+                startDate = endDate = dateStr;
+            } else if (period === 'week') {
+                const day = date.getDay();
+                const diffToSun = day;
+                const start = new Date(date);
+                start.setDate(date.getDate() - diffToSun);
+                const end = new Date(start);
+                end.setDate(start.getDate() + 6);
+                startDate = start.toISOString().slice(0, 10);
+                endDate = end.toISOString().slice(0, 10);
+            } else {
+                const start = new Date(date.getFullYear(), date.getMonth(), 1);
+                const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+                startDate = start.toISOString().slice(0, 10);
+                endDate = end.toISOString().slice(0, 10);
+            }
+            return { startDate, endDate };
+        }
+
+        function renderPeriodLabel(startDate, endDate) {
+            const start = new Date(startDate + 'T00:00:00');
+            const end = new Date(endDate + 'T00:00:00');
+            const label = currentPeriod === 'day'
+                ? formatArabicDateNoDay(start)
+                : formatArabicDateNoDay(start) + ' — ' + formatArabicDateNoDay(end);
+            document.getElementById('period-label').textContent = label;
+        }
+
+        function resetAndLoad() {
+            currentPage = 0;
+            loadEvents();
+        }
+
+        function formatEventTypeBadge(eventType) {
+            const labels = {
+                session_started: 'Session Started',
+                session_ended: 'Session Ended',
+                message_sent: 'Message Sent',
+                shift_started: 'Shift Started',
+                shift_ended: 'Shift Ended',
+                shift_reopened: 'Shift Reopened',
+                shift_adjusted: 'Shift Adjusted',
+                break_started: 'Break Started',
+                break_resumed: 'Break Resumed',
+                idle_started: 'Idle Started',
+                idle_resumed: 'Idle Resumed',
+                tab_focus_lost: 'Tab Focus Lost',
+                tab_focus_gained: 'Tab Focus Gained',
+            };
+            const label = labels[eventType] || eventType;
+            return `<span class="event-type-badge ${eventType}">${label}</span>`;
+        }
+
+        function formatEventDescription(event) {
+            const name = event.agent_name || "Unknown";
+            const meta = event.metadata || {};
+            const responseTime = meta.response_time_seconds ? formatDuration(meta.response_time_seconds) : null;
+            const durationSec = meta.duration_seconds ? formatDuration(meta.duration_seconds) : null;
+            const breakDuration = meta.break_duration_seconds ? formatDuration(meta.break_duration_seconds) : null;
+            const reason = meta.reason || "";
+
+            switch (event.event_type) {
+                case "session_started":
+                    return "Opened chat session";
+                case "session_ended":
+                    if (reason === "auto_timeout") return "Session auto-closed (timeout)";
+                    if (reason === "new_chat_opened") return "Previous chat closed (new chat opened)";
+                    return "Closed chat" + (durationSec ? ` (${durationSec})` : "");
+                case "message_sent":
+                    return "Sent message" + (responseTime ? ` — response: ${responseTime}` : "");
+                case "idle_started":
+                    return "Went idle";
+                case "idle_resumed":
+                    return "Resumed activity";
+                case "shift_started":
+                    return "Started shift";
+                case "shift_ended":
+                    return "Ended shift" + (durationSec ? ` (${durationSec})` : "");
+                case "shift_reopened":
+                    return "Reopened shift";
+                case "shift_adjusted":
+                    return "Shift adjusted" + (reason ? ` — ${reason}` : "");
+                case "break_started":
+                    return "Started break";
+                case "break_resumed":
+                    return "Ended break" + (breakDuration ? ` (${breakDuration})` : "");
+                case "tab_focus_lost":
+                    return "Left tab";
+                case "tab_focus_gained":
+                    return "Returned to tab";
+                default:
+                    return event.event_type;
+            }
+        }
+
+        function formatMetadata(event) {
+            const meta = event.metadata || {};
+            const parts = [];
+            if (event.session_id) parts.push(`Session #${event.session_id}`);
+            if (event.shift_id) parts.push(`Shift #${event.shift_id}`);
+            if (meta.response_time_seconds) parts.push(`Response: ${formatDuration(meta.response_time_seconds)}`);
+            if (meta.duration_seconds) parts.push(`Duration: ${formatDuration(meta.duration_seconds)}`);
+            if (meta.break_duration_seconds) parts.push(`Break: ${formatDuration(meta.break_duration_seconds)}`);
+            if (meta.gross_duration_seconds) parts.push(`Gross: ${formatDuration(meta.gross_duration_seconds)}`);
+            if (meta.break_seconds) parts.push(`Breaks: ${formatDuration(meta.break_seconds)}`);
+            if (meta.reason && meta.reason !== "auto_timeout" && meta.reason !== "new_chat_opened") parts.push(`Reason: ${meta.reason}`);
+            return parts.length > 0 ? parts.join(' · ') : '-';
+        }
+
+        async function loadEvents() {
+            const tbody = document.getElementById("events-body");
+            const date = document.getElementById('filter-date').value;
+            if (!date) return;
+
+            const agentId = document.getElementById('filter-agent').value;
+            const eventType = document.getElementById('filter-event-type').value;
+            const { startDate, endDate } = getDateRange(currentPeriod, date);
+
+            renderPeriodLabel(startDate, endDate);
+
+            const params = new URLSearchParams();
+            if (agentId) params.set('agent_id', agentId);
+            if (eventType) params.set('event_type', eventType);
+            params.set('date_from', startDate);
+            params.set('date_to', endDate);
+            params.set('limit', EVENTS_PER_PAGE);
+            params.set('offset', currentPage * EVENTS_PER_PAGE);
+
+            try {
+                const res = await authFetch(`/api/activity-events?${params.toString()}`);
+                const data = await res.json();
+                currentTotal = data.total || 0;
+                const events = data.events || [];
+
+                renderSummary(currentTotal);
+
+                if (events.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty">No activity events for this period.</td></tr>';
+                    renderPagination();
+                    return;
+                }
+
+                tbody.innerHTML = events.map(event => `
+                    <tr>
+                        <td>${formatArabicDateTime(new Date(event.created_at))}</td>
+                        <td>${event.agent_name || '-'}</td>
+                        <td>${formatEventTypeBadge(event.event_type)}</td>
+                        <td>${formatEventDescription(event)}</td>
+                        <td class="metadata-cell">${formatMetadata(event)}</td>
+                    </tr>
+                `).join("");
+
+                renderPagination();
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty">Failed to load activity events.</td></tr>';
+            }
+        }
+
+        function renderSummary(total) {
+            const bar = document.getElementById('summary-bar');
+            bar.innerHTML = `
+                <div class="summary-stat">
+                    <div class="label">Total Events</div>
+                    <div class="value">${total}</div>
+                </div>
+            `;
+        }
+
+        function renderPagination() {
+            const container = document.getElementById('pagination');
+            const totalPages = Math.ceil(currentTotal / EVENTS_PER_PAGE);
+            if (totalPages <= 1) {
+                container.innerHTML = '';
+                return;
+            }
+            const showing = Math.min((currentPage + 1) * EVENTS_PER_PAGE, currentTotal);
+            let html = `<span class="pagination-info">Showing ${currentPage * EVENTS_PER_PAGE + 1}–${showing} of ${currentTotal}</span>`;
+            html += `<button onclick="goToPage(${currentPage - 1})" ${currentPage === 0 ? 'disabled' : ''}>← Previous</button>`;
+
+            const maxButtons = 5;
+            let startPage = Math.max(0, currentPage - Math.floor(maxButtons / 2));
+            let endPage = Math.min(totalPages - 1, startPage + maxButtons - 1);
+            if (endPage - startPage < maxButtons - 1) startPage = Math.max(0, endPage - maxButtons + 1);
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button onclick="goToPage(${i})" class="${i === currentPage ? 'active' : ''}">${i + 1}</button>`;
+            }
+
+            html += `<button onclick="goToPage(${currentPage + 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>Next →</button>`;
+            container.innerHTML = html;
+        }
+
+        function goToPage(page) {
+            currentPage = page;
+            loadEvents();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function clearFilters() {
+            document.getElementById('filter-agent').value = '';
+            document.getElementById('filter-event-type').value = '';
+            document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);
+            currentPeriod = 'month';
+            document.querySelectorAll('#period-toggle button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === 'month');
+            });
+            resetAndLoad();
+        }
+
+        // Load agent list for filter dropdown
+        async function loadAgentList() {
+            try {
+                const res = await authFetch('/api/agents');
+                if (!res.ok) return;
+                const agents = await res.json();
+                const select = document.getElementById('filter-agent');
+                agents.forEach(a => {
+                    const opt = document.createElement('option');
+                    opt.value = a.id;
+                    opt.textContent = a.name || a.email;
+                    select.appendChild(opt);
+                });
+            } catch (err) {
+                console.error("Failed to load agent list:", err);
+            }
+        }
+
+        // Initialize
+        document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);
+        loadAgentList();
+        loadEvents();
+        setInterval(loadEvents, 5000);
+    </script>
+</body>
+</html>
