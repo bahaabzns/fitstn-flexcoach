@@ -4,7 +4,7 @@ const statusDetail = document.getElementById("status-detail");
 const statusContainer = document.getElementById("status-container");
 const notSignedIn = document.getElementById("not-signed-in");
 
-const statusLabels = { in_session: "In Session", between_sessions: "Between Sessions", idle: "Idle", off_shift: "Off Shift" };
+const statusLabels = { in_session: "In Session", between_sessions: "Off-session work", idle: "Idle", off_shift: "Off Shift" };
 
 function formatDuration(seconds) {
     if (seconds < 0) seconds = 0;
@@ -40,7 +40,7 @@ async function loadStatus() {
             statusDetail.textContent = "In chat: " + (data.chat_name || "Unknown") + " (" + formatDuration(chatSec) + ")";
             statusDetail.style.display = "block";
         } else if (data.status === "between_sessions") {
-            statusDetail.textContent = "Between sessions for " + formatDuration(data.idle_since_seconds || 0);
+            statusDetail.textContent = "Off-session for " + formatDuration(data.idle_since_seconds || 0);
             statusDetail.style.display = "block";
         } else if (data.status === "idle") {
             statusDetail.textContent = "Idle for " + formatDuration(data.idle_since_seconds || 0);

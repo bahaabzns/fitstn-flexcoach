@@ -203,7 +203,7 @@ document.addEventListener("visibilitychange", () => {
 
 /* ───────── Agent Status Badge (top-right corner) ───────── */
 
-const STATUS_LABELS = { in_session: "In Session", between_sessions: "Between Sessions", idle: "Idle", on_break: "On Break", off_shift: "Off Shift", not_signed_in: "Not Signed In" };
+const STATUS_LABELS = { in_session: "In Session", between_sessions: "Off-session work", idle: "Idle", on_break: "On Break", off_shift: "Off Shift", not_signed_in: "Not Signed In" };
 const STATUS_COLORS = {
     in_session:        { bg: "#dcfce7", border: "#22c55e", text: "#15803d", dot: "#22c55e" },
     between_sessions:  { bg: "#fef9c3", border: "#eab308", text: "#a16207", dot: "#eab308" },
@@ -248,7 +248,7 @@ function createStatusBadge() {
                 <div id="fc-shift-times" style="display:none; margin-top:2px; font-size:11px; color:#94a3b8; gap:12px;">
                     <span><span style="color:#64748b;">Shift:</span> <strong id="fc-time-shift" style="color:#e2e8f0;">--</strong></span>
                     <span><span style="color:#64748b;">Active:</span> <strong id="fc-time-active" style="color:#4ade80;">--</strong></span>
-                    <span><span style="color:#64748b;">Between Sessions:</span> <strong id="fc-time-idle" style="color:#facc15;">--</strong></span>
+                    <span><span style="color:#64748b;">Off-session work:</span> <strong id="fc-time-idle" style="color:#facc15;">--</strong></span>
                     <span><span style="color:#64748b;">Break:</span> <strong id="fc-time-break" style="color:#a78bfa;">--</strong></span>
                 </div>
             </div>
@@ -665,7 +665,7 @@ async function updateStatusBadge() {
             detail.textContent = (data.chat_name || "Unknown") + " · " + formatStatusDuration(data.chat_duration_seconds || 0);
             detail.style.display = "inline";
         } else if (data.status === "between_sessions") {
-            detail.textContent = "Between sessions for " + formatStatusDuration(data.idle_since_seconds || 0);
+            detail.textContent = "Off-session for " + formatStatusDuration(data.idle_since_seconds || 0);
             detail.style.display = "inline";
         } else if (data.status === "idle") {
             detail.textContent = "Idle for " + formatStatusDuration(data.idle_since_seconds || 0);

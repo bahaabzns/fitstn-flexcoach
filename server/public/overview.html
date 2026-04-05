@@ -447,7 +447,7 @@
         // =====================
         // LIVE OVERVIEW (admin only)
         // =====================
-        const statusLabels = { in_session: 'In Session', between_sessions: 'Between Sessions', idle: 'Idle', on_break: 'On Break', off_shift: 'Off Shift' };
+        const statusLabels = { in_session: 'In Session', between_sessions: 'Off-session work', idle: 'Idle', on_break: 'On Break', off_shift: 'Off Shift' };
         let thresholdsCache = { warning: 5 * 60, critical: 10 * 60, maxSession: 30 * 60 };
 
         async function fetchThresholds() {
@@ -503,7 +503,7 @@
                         `;
                     } else if (agent.status === 'between_sessions') {
                         const idleSec = Math.round((Date.now() - new Date(agent.idle_since).getTime()) / 1000);
-                        detailsHtml = `<div class="card-detail"><strong>Between sessions for:</strong> ${formatDuration(idleSec)}</div>`;
+                        detailsHtml = `<div class="card-detail"><strong>Off-session for:</strong> ${formatDuration(idleSec)}</div>`;
                     } else if (agent.status === 'idle') {
                         const idleSec = Math.round((Date.now() - new Date(agent.idle_since).getTime()) / 1000);
                         const agentLabel = agent.name || agent.email;
