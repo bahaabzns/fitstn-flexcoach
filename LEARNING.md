@@ -69,3 +69,22 @@
 - Performance of status polling at scale still an open question
 **Question I want to explore next:** Fixing silent error swallowing in closeSessionViaApi (DEBT #13) and setting up a test suite (DEBT #2)
 **Confidence today (1–10):** 8
+
+## 2026-04-06 — Session 5 (Debt Payment)
+
+**What we built:** No new features. Debt payment session — fixed 8 of 13 open debt items.
+**New concepts learned:**
+- CORS origin allowlist with callback function pattern (instead of wildcard string)
+- `escapeHtml()` via `textContent` → `innerHTML` as a safe browser-native XSS defense
+- SQL template fragment reuse in postgres.js — storing a `sql\`...\`` fragment in a variable and interpolating it into both count and data queries
+- In-memory settings cache with TTL + explicit invalidation pattern for reducing hot-path DB queries
+- Re-throwing in `.catch()` to preserve error propagation for upstream callers
+**Concepts I understood immediately:**
+- CORS restriction — straightforward allowlist matching
+- Named constants replacing magic numbers — simple rename exercise
+- Verifying existing guards (stop-before-start, dataset flags) rather than adding redundant ones
+**Concepts I am still fuzzy on:**
+- Whether postgres.js SQL fragment interpolation has edge cases (e.g., with parameterized values leaking across queries)
+- The two different idle calculation approaches (event-based in index.js vs remainder in agent-overview.js) — needs a design decision to unify
+**Question I want to explore next:** Setting up a test suite (DEBT #2) — biggest remaining debt item. Also input validation across route handlers (DEBT #5).
+**Confidence today (1–10):** 9
