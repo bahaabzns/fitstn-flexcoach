@@ -1010,4 +1010,4 @@ Every 10 sessions, summarize into a progress report.
 > *"Run the Reorganization Routine from bob.instructions.md. Read everything, change nothing, and give me the audit report first."*
 
 **Pay down debt:**
-> *"We have completed 5 features. Run a Debt Payment Session from bob.instructions.md. No new features today."*
+*We have completed 5 features. Run a Debt Payment Session from bob.instructions.md. No new features today.*
