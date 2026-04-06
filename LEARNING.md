@@ -140,3 +140,18 @@
 - postgres.js SQL fragment interpolation edge cases (carried over)
 **Question I want to explore next:** Setting up a test suite (DEBT #2). Also pagination for the cutoff split if agents exceed 500 pending.
 **Confidence today (1–10):** 9
+
+## 2026-04-06 — Session 8 (Bug Fixes)
+
+**What we fixed:** Two bugs in the agent workload feature — (1) `const demandLine` couldn't be reassigned with `+=` (changed to `let`), (2) negative `pendingBeforeCutoff` numbers caused by counting cutoff timestamps from ALL rooms (handled + pending) while `data.total` only counts pending rooms.
+**New concepts learned:**
+- RPC `data.rooms` vs `data.total` semantic mismatch — the rooms array includes all rooms matching filter criteria (handled + pending), but `total` is additionally filtered by `p_last_message_from`, so `rooms.length > total` is possible and common
+- Defensive capping with `Math.min()` as a quick fix when upstream data has mixed semantics — not ideal but prevents user-facing bugs while the real fix (filtering rooms to pending-only) is planned
+**Concepts I understood immediately:**
+- `const` vs `let` — `const` prevents reassignment, caught immediately from error message
+- Root cause analysis from user-reported numbers — pattern recognition (same "212 after-cutoff" for multiple agents = shared room pool, not agent-specific pending)
+**Concepts I am still fuzzy on:**
+- FlexCoach RPC exact filtering behavior for `rooms` array vs `total` count — which parameters affect which
+- postgres.js SQL fragment interpolation edge cases (carried over)
+**Question I want to explore next:** Filter rooms to pending-only before cutoff split (DEBT #19). Setting up a test suite (DEBT #2).
+**Confidence today (1–10):** 9

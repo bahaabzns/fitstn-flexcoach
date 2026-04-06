@@ -14,6 +14,7 @@
 | 2026-04-06 | Debt payment session — 8 items resolved | N/A (no new features) | CORS, silent catches, XSS escaping, SQL dedup, magic numbers, settings cache |
 | 2026-04-06 | Unify shift numbers — gap-based idle, Active/In-Active tree with sub-labels | 1 — duplicate computeGapIdle logic inlined in index.js | Yes — extracted to shared server/utils/shift-utils.js. 2 warnings logged (N+1 queries, dual-language idle algo) |
 | 2026-04-06 | Agent workload — per-agent shift hours, demand timeline, cutoff split, oldest pending | 1 — duplicate isPastCutoff logic in endpoint + snapshot | Yes — extracted getSlaCutoffStatus(). 3 warnings fixed (magic 500, unused email col, var→const). DEBT #18 logged |
+| 2026-04-06 | Bug fix — negative pendingBeforeCutoff + const demandLine | 2 bugs — const→let reassignment crash, rooms array includes handled rooms causing negative math | Yes — let fix + Math.min cap on pendingAfterCutoff. DEBT #19 logged for deeper fix |
 
 ---
 
