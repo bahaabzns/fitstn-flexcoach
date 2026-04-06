@@ -705,8 +705,8 @@ async function updateStatusBadge() {
         }
 
         updateActionButtons(true, isOnShift, isOnBreak);
-    } catch {
-        // keep last known state
+    } catch (err) {
+        console.warn("updateStatusBadge failed:", err.message);
     }
 }
 
