@@ -1002,14 +1002,12 @@ Every 10 sessions, summarize into a progress report.
 **Add a new feature:**
 > *"I want to add [feature]. Run the Feature Routine from bob.instructions.md."*
 
-**Review code:**
-> *"Feature is working. Run the full Code Review Routine on every edits before we commit."*
+**Review code and End any session:**
+
+*Feature is working. Run the full Code Review Routine on every edits before we commit then Run the Session Closing Routine from bob.instructions.md before I close.*
 
 **Clean up a messy project:**
 > *"Run the Reorganization Routine from bob.instructions.md. Read everything, change nothing, and give me the audit report first."*
-
-**End any session:**
-> *"Run the Session Closing Routine from bob.instructions.md before I close."*
 
 **Pay down debt:**
 > *"We have completed 5 features. Run a Debt Payment Session from bob.instructions.md. No new features today."*
