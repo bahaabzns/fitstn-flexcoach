@@ -987,7 +987,7 @@
                     const shiftInfo = 'Shift ends: ' + (agent.shift_end_time || '--:--') + (isPastShift ? '' : ' (' + agent.hours_remaining + 'h left)');
 
                     // Demand row: yesterday | today | tomorrow (after cutoff)
-                    const demandLine = '<span style="color:#888;">Yesterday: <strong>' + agent.yesterday_demand + '</strong></span>' +
+                    let demandLine = '<span style="color:#888;">Yesterday: <strong>' + agent.yesterday_demand + '</strong></span>' +
                         ' &nbsp;|&nbsp; Today: <strong>' + agent.daily_demand + '</strong>';
                     if (agent.tomorrow_demand != null) {
                         demandLine += ' &nbsp;|&nbsp; <span style="color:#fd7e14;">Tomorrow: <strong>' + agent.tomorrow_demand + '</strong></span>';
