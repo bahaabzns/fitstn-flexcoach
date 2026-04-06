@@ -69,15 +69,19 @@ module.exports = function (sql, requireAgent, requireAdmin) {
             const offset = Math.max(0, parseInt(req.query.offset) || 0);
             const limit = Math.min(parseInt(req.query.limit) || DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
 
+            // Shared filter fragment — used in both count and data queries
+            const whereFilters = sql`
+                ${agentId ? sql`AND ae.agent_id = ${agentId}` : sql``}
+                ${eventType ? sql`AND ae.event_type = ${eventType}` : sql``}
+                ${since ? sql`AND ae.created_at > ${since}::timestamp` : sql``}
+                ${dateFrom ? sql`AND ae.created_at >= ${dateFrom}::date` : sql``}
+                ${dateTo ? sql`AND ae.created_at < ${dateTo}::date + INTERVAL '1 day'` : sql``}
+            `;
+
             const countResult = await sql`
                 SELECT COUNT(*)::int AS total
                 FROM activity_events ae
-                WHERE 1=1
-                    ${agentId ? sql`AND ae.agent_id = ${agentId}` : sql``}
-                    ${eventType ? sql`AND ae.event_type = ${eventType}` : sql``}
-                    ${since ? sql`AND ae.created_at > ${since}::timestamp` : sql``}
-                    ${dateFrom ? sql`AND ae.created_at >= ${dateFrom}::date` : sql``}
-                    ${dateTo ? sql`AND ae.created_at < ${dateTo}::date + INTERVAL '1 day'` : sql``}
+                WHERE 1=1 ${whereFilters}
             `;
 
             const events = await sql`
@@ -92,12 +96,7 @@ module.exports = function (sql, requireAgent, requireAdmin) {
                     ae.created_at
                 FROM activity_events ae
                 JOIN agents a ON a.id = ae.agent_id
-                WHERE 1=1
-                    ${agentId ? sql`AND ae.agent_id = ${agentId}` : sql``}
-                    ${eventType ? sql`AND ae.event_type = ${eventType}` : sql``}
-                    ${since ? sql`AND ae.created_at > ${since}::timestamp` : sql``}
-                    ${dateFrom ? sql`AND ae.created_at >= ${dateFrom}::date` : sql``}
-                    ${dateTo ? sql`AND ae.created_at < ${dateTo}::date + INTERVAL '1 day'` : sql``}
+                WHERE 1=1 ${whereFilters}
                 ORDER BY ae.created_at DESC
                 LIMIT ${limit}
                 OFFSET ${offset}
