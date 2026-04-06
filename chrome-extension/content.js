@@ -6,16 +6,18 @@ const API_URL = API_BASE + "/api/chat-click";
 let currentToken = null;
 let observer = null;
 let sessionTimer = null;
-let maxSessionSeconds = 30 * 60; // default 30 min, updated from server
+let maxSessionSeconds = 30 * 60; // default, updated from server via fetchMaxSessionThreshold()
 let statusInterval = null;
 let messageInterceptorAttached = false;
 let currentStatus = null;
 
-// Idle detection and activity tracking
-const IDLE_CHECK_INTERVAL_MS = 10000;
-const MOUSE_DEBOUNCE_MS = 1000;
-let idleThresholdMs = 2 * 60 * 1000; // default 2 min, updated from server
-let sessionTimeoutMs = 10 * 60 * 1000; // default 10 min, updated from server
+// Idle detection and activity tracking — defaults updated from server settings
+const IDLE_CHECK_INTERVAL_MS = 10_000;
+const MOUSE_DEBOUNCE_MS = 1_000;
+const DEFAULT_IDLE_THRESHOLD_MS = 2 * 60 * 1000;
+const DEFAULT_SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+let idleThresholdMs = DEFAULT_IDLE_THRESHOLD_MS;
+let sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MS;
 let lastActivityTimestamp = Date.now();
 let isCurrentlyIdle = false;
 let idleSinceTimestamp = null;
