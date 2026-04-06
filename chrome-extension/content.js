@@ -525,30 +525,25 @@ async function handleOffSessionWork() {
     }
 }
 
-function showOffSessionToast(message) {
+function showToast(message, { bg = "#dc3545", color = "#fff", fontWeight = "normal", duration = 4000 } = {}) {
     const toast = document.createElement("div");
     toast.style.cssText = `
         position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-        background: #f59e0b; color: #1e293b; padding: 12px 24px; border-radius: 8px;
+        background: ${bg}; color: ${color}; padding: 12px 24px; border-radius: 8px;
         font-family: Arial, sans-serif; font-size: 14px; z-index: 99999;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-weight: 600;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-weight: ${fontWeight};
     `;
     toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => toast.remove(), duration);
+}
+
+function showOffSessionToast(message) {
+    showToast(message, { bg: "#f59e0b", color: "#1e293b", fontWeight: "600", duration: 3000 });
 }
 
 function showBreakError(message) {
-    const toast = document.createElement("div");
-    toast.style.cssText = `
-        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-        background: #dc3545; color: #fff; padding: 12px 24px; border-radius: 8px;
-        font-family: Arial, sans-serif; font-size: 14px; z-index: 99999;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    `;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
+    showToast(message, { bg: "#dc3545", color: "#fff" });
 }
 
 function handleOpenOverview() {
