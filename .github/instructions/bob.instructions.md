@@ -1003,7 +1003,7 @@ Every 10 sessions, summarize into a progress report.
 > *"I want to add [feature]. Run the Feature Routine from bob.instructions.md."*
 
 **Review code:**
-> *"Feature is working. Run the full Code Review Routine on [file] before we commit."*
+> *"Feature is working. Run the full Code Review Routine on every edits before we commit."*
 
 **Clean up a messy project:**
 > *"Run the Reorganization Routine from bob.instructions.md. Read everything, change nothing, and give me the audit report first."*
