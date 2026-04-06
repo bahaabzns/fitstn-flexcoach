@@ -705,20 +705,23 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
                 const pendingCount = data?.total || 0;
                 const rooms = data?.rooms || [];
 
-                // Split pending by cutoff: count rooms where last client message was before vs after cutoff
+                // Split pending by cutoff: rooms array may include handled rooms, so cap at pendingCount
                 let pendingBeforeCutoff = pendingCount;
                 let pendingAfterCutoff = 0;
                 let oldestBeforeCutoff = null;
                 if (isPastCutoff && rooms.length > 0) {
                     const beforeCutoffRooms = [];
+                    let afterCount = 0;
                     for (const r of rooms) {
                         const msgTime = r.last_client_message_at ? new Date(r.last_client_message_at) : null;
                         if (msgTime && msgTime >= cutoffToday) {
-                            pendingAfterCutoff++;
+                            afterCount++;
                         } else {
                             beforeCutoffRooms.push(r);
                         }
                     }
+                    // Cap: rooms includes handled + pending, but total is pending-only
+                    pendingAfterCutoff = Math.min(afterCount, pendingCount);
                     pendingBeforeCutoff = pendingCount - pendingAfterCutoff;
                     // Find oldest last_client_message_at among before-cutoff rooms
                     for (const r of beforeCutoffRooms) {
