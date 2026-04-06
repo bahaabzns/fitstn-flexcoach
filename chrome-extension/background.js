@@ -17,7 +17,9 @@ async function closeSession() {
     fetch(API_BASE + "/api/close-session", {
         method: "POST",
         headers: { Authorization: "Bearer " + token },
-    }).catch(() => {});
+    }).catch((err) => {
+        console.warn("closeSession failed:", err.message);
+    });
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {

@@ -365,6 +365,12 @@
             });
         }
 
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         // Hide admin-only elements for agents and show agent name as title
         if (isAgent) {
             document.getElementById('live-section').classList.add('hidden');
@@ -467,7 +473,7 @@
                             sessionExceededAgents.push(agent.name || agent.email);
                         }
                         detailsHtml = `
-                            <div class="card-detail"><strong>Chat:</strong> ${agent.current_chat_name || 'Unknown'}</div>
+                            <div class="card-detail"><strong>Chat:</strong> ${escapeHtml(agent.current_chat_name || 'Unknown')}</div>
                             <div class="card-detail${exceeded ? ' session-exceeded-text' : ''}"><strong>In chat for:</strong> ${formatDuration(chatSec)}${exceeded ? ' (exceeded!)' : ''}</div>
                         `;
                     } else if (agent.status === 'between_sessions') {
@@ -502,7 +508,7 @@
                     return `
                         <div class="agent-card status-${agent.status}${idleClass}">
                             <div class="card-header">
-                                <div class="agent-name">${agent.name || agent.email}</div>
+                                <div class="agent-name">${escapeHtml(agent.name || agent.email)}</div>
                                 <span class="status-badge ${badgeClass}">${statusLabels[agent.status]}</span>
                             </div>
                             ${detailsHtml}
@@ -903,7 +909,7 @@
 
                     return `
                         <div class="demand-card ${demandClass}">
-                            <span class="demand-agent">${d.agent_name}</span>
+                            <span class="demand-agent">${escapeHtml(d.agent_name)}</span>
                             <span class="demand-count">${d.demand_count}</span>
                         </div>
                     `;
@@ -972,7 +978,7 @@
 
                     return '<div class="workload-card status-' + agent.status + '">' +
                         '<div class="wl-header">' +
-                            '<span class="wl-agent">' + agent.agent_name + '</span>' +
+                            '<span class="wl-agent">' + escapeHtml(agent.agent_name) + '</span>' +
                             '<span class="wl-badge ' + agent.status + '">' + agent.status + '</span>' +
                         '</div>' +
                         '<div class="wl-stats">' +

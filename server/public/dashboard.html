@@ -198,8 +198,8 @@
                     }
                     return `<tr>
                         <td>${row.id}</td>
-                        <td>${row.agent_name || row.agent_email || "-"}</td>
-                        <td>${row.chat_preview || "-"}</td>
+                        <td>${escapeHtml(row.agent_name || row.agent_email || "-")}</td>
+                        <td>${escapeHtml(row.chat_preview || "-")}</td>
                         <td>${formatArabicDateTime(new Date(row.clicked_at))}</td>
                         <td>${row.duration_seconds != null ? formatDuration(row.duration_seconds) : formatDuration(Math.round((Date.now() - new Date(row.clicked_at).getTime()) / 1000))}</td>
                         <td>

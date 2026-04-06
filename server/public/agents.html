@@ -171,6 +171,12 @@
             window.location.href = '/';
         }
 
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         function showMsg(text, type) {
             const el = document.getElementById('message');
             el.textContent = text;
@@ -191,9 +197,9 @@
                 tbody.innerHTML = data.map(a => `
                     <tr>
                         <td>${a.id}</td>
-                        <td>${a.email}</td>
-                        <td>${a.name || '-'}</td>
-                        <td style="font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${a.fitstn_id || ''}">${a.fitstn_id || '-'}</td>
+                        <td>${escapeHtml(a.email)}</td>
+                        <td>${escapeHtml(a.name || '-')}</td>
+                        <td style="font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(a.fitstn_id || '')}">${escapeHtml(a.fitstn_id || '-')}</td>
                         <td>${formatTime(a.shift_start_time)}</td>
                         <td>${formatTime(a.shift_end_time)}</td>
                         <td>${formatTime(a.sla_cutoff_time)}</td>

@@ -96,7 +96,23 @@ const agentOverviewRoutes = require("./routes/agent-overview")(sql);
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
 const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin);
 
-app.use(cors({ origin: "*", allowedHeaders: ["Content-Type", "Authorization"] }));
+// CORS: restrict to known clients (dev + production)
+const ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://fitstn-flexcoach.onrender.com",
+    "chrome-extension://",
+];
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (server-to-server, curl, chrome extensions)
+        if (!origin || ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed))) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS"));
+        }
+    },
+    allowedHeaders: ["Content-Type", "Authorization"],
+}));
 app.use(express.json());
 app.use(express.text());
 app.use(express.static(path.join(__dirname, "public")));

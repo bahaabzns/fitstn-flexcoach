@@ -159,6 +159,12 @@
             window.location.href = '/';
         }
 
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         function formatDuration(seconds) {
             if (seconds < 60) return seconds + 's';
             const mins = Math.floor(seconds / 60);
@@ -233,7 +239,7 @@
                     return `
                         <tr>
                             <td>${row.id}</td>
-                            <td>${row.agent_name || row.agent_email || "-"}</td>
+                            <td>${escapeHtml(row.agent_name || row.agent_email || "-")}</td>
                             <td>${formatArabicDateTime(new Date(row.shift_started_at))}</td>
                             <td>${isActive ? "-" : formatArabicDateTime(new Date(row.shift_ended_at))}</td>
                             <td>${duration}</td>

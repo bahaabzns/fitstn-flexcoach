@@ -275,6 +275,12 @@
             window.location.href = '/';
         }
 
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         function showMsg(text, type) {
             const el = document.getElementById('message');
             el.textContent = text;
@@ -442,7 +448,7 @@
                 }
                 tbody.innerHTML = deductions.map(d => `
                     <tr>
-                        <td>${d.name}</td>
+                        <td>${escapeHtml(d.name)}</td>
                         <td>${d.type === 'percentage' ? 'Percentage' : d.type === 'days' ? 'Days' : 'Fixed'}</td>
                         <td>${d.type === 'percentage' ? d.value + '%' : d.type === 'days' ? d.value + ' day(s)' : formatCurrency(d.value)}</td>
                         <td>
@@ -541,7 +547,7 @@
                         <td>${e.hours}${isDay ? ' day(s)' : ' hrs'}</td>
                         <td>${isDay ? 'salary/30' : formatCurrency(e.rate_per_hour) + '/hr'}</td>
                         <td>${isDay ? '-' : formatCurrency(e.hours * e.rate_per_hour)}</td>
-                        <td>${e.note || '-'}</td>
+                        <td>${escapeHtml(e.note || '-')}</td>
                         <td class="actions">
                             <button class="btn btn-danger btn-sm" onclick="deleteOvertime(${e.id})">Delete</button>
                         </td>
@@ -632,7 +638,7 @@
                         let valueLabel = d.type === 'percentage' ? d.value + '%' : d.type === 'days' ? d.value + ' day(s) x ' + formatCurrency(d.day_price) + '/day' : formatCurrency(d.value);
                         return `
                         <tr>
-                            <td>${d.name}</td>
+                            <td>${escapeHtml(d.name)}</td>
                             <td>${typeLabel}</td>
                             <td>${valueLabel}</td>
                             <td>${formatCurrency(d.calculated_amount)}</td>
@@ -653,7 +659,7 @@
                             <td>${o.value}${isDay ? ' day(s)' : ' hrs'}</td>
                             <td>${isDay ? formatCurrency(o.day_price) + '/day' : formatCurrency(o.rate_per_hour) + '/hr'}</td>
                             <td>${formatCurrency(o.amount)}</td>
-                            <td>${o.note || '-'}</td>
+                            <td>${escapeHtml(o.note || '-')}</td>
                         </tr>`;
                     }).join('')
                     + '</tbody></table>';

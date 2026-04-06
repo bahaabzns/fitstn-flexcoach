@@ -95,7 +95,10 @@ function closeSessionViaApi() {
     return fetch(API_BASE + "/api/close-session", {
         method: "POST",
         headers: { Authorization: "Bearer " + currentToken },
-    }).catch(() => {});
+    }).catch((err) => {
+        console.warn("closeSessionViaApi failed:", err.message);
+        throw err;
+    });
 }
 
 /* ───────── Activity Event Helper ───────── */
@@ -109,7 +112,9 @@ function postActivityEvent(eventType, extraData = {}) {
             Authorization: "Bearer " + currentToken,
         },
         body: JSON.stringify({ event_type: eventType, ...extraData }),
-    }).catch(() => {});
+    }).catch((err) => {
+        console.warn("postActivityEvent failed:", eventType, err.message);
+    });
 }
 
 /* ───────── Idle Detection (Inside Sessions) ───────── */
@@ -748,7 +753,9 @@ function fetchMaxSessionThreshold() {
                 sessionTimeoutMs = parseInt(data.session_timeout_minutes) * 60 * 1000;
             }
         })
-        .catch(() => {});
+        .catch((err) => {
+            console.warn("fetchMaxSessionThreshold failed:", err.message);
+        });
 }
 
 function showSessionPopup(initialElapsedSeconds) {
