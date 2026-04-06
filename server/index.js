@@ -72,6 +72,7 @@ async function checkIfClientWaiting(chatName) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const MAX_ROOMS_PER_FETCH = 500; // RPC pagination cap for cutoff-split analysis
 
 const sql = process.env.DATABASE_URL
     ? postgres(process.env.DATABASE_URL, { ssl: "require" })
@@ -618,14 +619,12 @@ app.get("/api/agent-demand", requireAdmin, async (req, res) => {
 
 app.get("/api/agent-workload", requireAdmin, async (req, res) => {
     try {
-        const settingsRows = await sql`SELECT key, value FROM settings WHERE key IN ('avg_minutes_per_chat', 'sla_cutoff_time')`;
-        const settings = {};
-        for (const row of settingsRows) settings[row.key] = row.value;
-        const avgMinutesPerChat = parseInt(settings.avg_minutes_per_chat) || 10;
-        const slaCutoffTime = settings.sla_cutoff_time || '14:00';
+        const [avgMinRow] = await sql`SELECT value FROM settings WHERE key = 'avg_minutes_per_chat'`;
+        const avgMinutesPerChat = parseInt(avgMinRow?.value) || 10;
+        const { slaCutoffTime, cutH, cutM, isPastCutoff } = await getSlaCutoffStatus();
 
         const agents = await sql`
-            SELECT id, name, email, fitstn_id
+            SELECT id, name, fitstn_id, shift_end_time
             FROM agents
             WHERE is_active = true AND fitstn_id IS NOT NULL AND fitstn_id != ''
         `;
@@ -636,13 +635,39 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
 
         await ensureSupabaseAuth();
 
+        // Fetch today's + yesterday's snapshots
+        const today = formatLocalDate(new Date());
+        const yesterdayDate = new Date();
+        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+        const yesterday = formatLocalDate(yesterdayDate);
+
+        const snapshotRows = await sql`
+            SELECT snapshot_date::text, agent_id, demand_count, cutoff_demand_count
+            FROM demand_snapshots
+            WHERE snapshot_date IN (${today}::date, ${yesterday}::date)
+        `;
+        const dailyDemandByAgent = {};
+        const cutoffDemandByAgent = {};
+        const yesterdayDemandByAgent = {};
+        for (const row of snapshotRows) {
+            const dateStr = row.snapshot_date.slice(0, 10);
+            if (dateStr === today) {
+                dailyDemandByAgent[row.agent_id] = row.demand_count;
+                cutoffDemandByAgent[row.agent_id] = row.cutoff_demand_count;
+            } else {
+                yesterdayDemandByAgent[row.agent_id] = row.demand_count;
+            }
+        }
+
+        const now = new Date();
+
         const rpcParams = (overrides) => ({
             p_assigned_staff_id: null,
             p_client_gender: null,
             p_coach_id: null,
             p_ghost_days: null,
             p_ghost_only: false,
-            p_last_interaction: null,
+            p_last_interaction: "today",
             p_last_interaction_from: null,
             p_last_interaction_to: null,
             p_last_message_from: "client",
@@ -661,43 +686,97 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
             ...overrides,
         });
 
-        const [hours, minutes] = slaCutoffTime.split(':').map(Number);
-        const now = new Date();
-        const cutoffToday = new Date(now);
-        cutoffToday.setHours(hours, minutes, 0, 0);
-        const hoursRemaining = Math.max(0, (cutoffToday - now) / (1000 * 60 * 60));
-        const isPastCutoff = hoursRemaining === 0;
         const maxChatsPerHour = 60 / avgMinutesPerChat;
+
+        // Build cutoff timestamp for today to split pending rooms
+        const cutoffToday = new Date(now);
+        cutoffToday.setHours(cutH, cutM, 0, 0);
 
         const agentPromises = agents.map(async (agent) => {
             try {
-                const { data, error } = await supabase.rpc("get_chat_rooms_paginated", rpcParams({ p_assigned_staff_id: agent.fitstn_id }));
+                // Fetch with high limit to get room details for cutoff split
+                const { data, error } = await supabase.rpc("get_chat_rooms_paginated", rpcParams({ p_assigned_staff_id: agent.fitstn_id, p_limit: MAX_ROOMS_PER_FETCH }));
 
                 if (error) {
                     console.error(`Workload fetch failed for ${agent.name}:`, error.message);
-                    return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: error.message };
+                    return { agent_id: agent.id, agent_name: agent.name, pending_count: 0, daily_demand: 0, error: error.message };
                 }
 
-                const demandCount = data?.total || 0;
-                const requiredPace = isPastCutoff ? demandCount : (hoursRemaining > 0 ? demandCount / hoursRemaining : 0);
+                const pendingCount = data?.total || 0;
+                const rooms = data?.rooms || [];
+
+                // Split pending by cutoff: count rooms where last client message was before vs after cutoff
+                let pendingBeforeCutoff = pendingCount;
+                let pendingAfterCutoff = 0;
+                let oldestBeforeCutoff = null;
+                if (isPastCutoff && rooms.length > 0) {
+                    const beforeCutoffRooms = [];
+                    for (const r of rooms) {
+                        const msgTime = r.last_client_message_at ? new Date(r.last_client_message_at) : null;
+                        if (msgTime && msgTime >= cutoffToday) {
+                            pendingAfterCutoff++;
+                        } else {
+                            beforeCutoffRooms.push(r);
+                        }
+                    }
+                    pendingBeforeCutoff = pendingCount - pendingAfterCutoff;
+                    // Find oldest last_client_message_at among before-cutoff rooms
+                    for (const r of beforeCutoffRooms) {
+                        const t = r.last_client_message_at ? new Date(r.last_client_message_at) : null;
+                        if (t && (!oldestBeforeCutoff || t < oldestBeforeCutoff)) oldestBeforeCutoff = t;
+                    }
+                } else if (rooms.length > 0) {
+                    // Before cutoff time — all rooms are "before cutoff", find oldest
+                    for (const r of rooms) {
+                        const t = r.last_client_message_at ? new Date(r.last_client_message_at) : null;
+                        if (t && (!oldestBeforeCutoff || t < oldestBeforeCutoff)) oldestBeforeCutoff = t;
+                    }
+                }
+
+                const dailyDemand = dailyDemandByAgent[agent.id] || 0;
+                const yesterdayDemand = yesterdayDemandByAgent[agent.id] || 0;
+                const cutoffDemand = cutoffDemandByAgent[agent.id];
+                const tomorrowDemand = (isPastCutoff && cutoffDemand != null) ? Math.max(0, dailyDemand - cutoffDemand) : null;
+                const handledCount = Math.max(0, dailyDemand - pendingCount);
+                const completionPct = dailyDemand > 0 ? Math.round((handledCount / dailyDemand) * 100) : 100;
+
+                // Hours remaining until this agent's shift ends
+                const shiftEnd = agent.shift_end_time || '19:00';
+                const [seh, sem] = shiftEnd.split(':').map(Number);
+                const shiftEndToday = new Date(now);
+                shiftEndToday.setHours(seh, sem, 0, 0);
+                const hoursLeft = Math.max(0, (shiftEndToday - now) / (1000 * 60 * 60));
+                const isPastShiftEnd = hoursLeft === 0;
+
+                const requiredPace = isPastShiftEnd ? pendingCount : (hoursLeft > 0 ? pendingCount / hoursLeft : 0);
                 const workloadRatio = maxChatsPerHour > 0 ? requiredPace / maxChatsPerHour : 0;
 
                 let status = 'comfortable';
-                if (isPastCutoff && demandCount > 0) status = 'overloaded';
+                if (isPastShiftEnd && pendingCount > 0) status = 'overloaded';
                 else if (workloadRatio > 1) status = 'overloaded';
                 else if (workloadRatio > 0.7) status = 'busy';
 
                 return {
                     agent_id: agent.id,
                     agent_name: agent.name,
-                    demand_count: demandCount,
+                    yesterday_demand: yesterdayDemand,
+                    daily_demand: dailyDemand,
+                    tomorrow_demand: tomorrowDemand,
+                    pending_count: pendingCount,
+                    pending_before_cutoff: pendingBeforeCutoff,
+                    pending_after_cutoff: isPastCutoff ? pendingAfterCutoff : null,
+                    oldest_pending_at: oldestBeforeCutoff ? oldestBeforeCutoff.toISOString() : null,
+                    handled_count: handledCount,
+                    completion_pct: completionPct,
                     required_pace: Math.round(requiredPace * 10) / 10,
                     workload_ratio: Math.round(workloadRatio * 100) / 100,
+                    hours_remaining: Math.round(hoursLeft * 10) / 10,
+                    shift_end_time: shiftEnd,
                     status,
                 };
             } catch (err) {
                 console.error(`Workload fetch error for ${agent.name}:`, err.message);
-                return { agent_id: agent.id, agent_name: agent.name, demand_count: 0, error: err.message };
+                return { agent_id: agent.id, agent_name: agent.name, pending_count: 0, daily_demand: 0, error: err.message };
             }
         });
 
@@ -706,7 +785,6 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
         res.json({
             agents: workloadResults,
             sla_cutoff_time: slaCutoffTime,
-            hours_remaining: Math.round(hoursRemaining * 10) / 10,
             is_past_cutoff: isPastCutoff,
             avg_minutes_per_chat: avgMinutesPerChat,
             max_chats_per_hour: maxChatsPerHour,
@@ -729,13 +807,15 @@ async function takeDemandSnapshot() {
 
     if (agents.length === 0) return { saved: 0, agents: [] };
 
+    const { isPastCutoff } = await getSlaCutoffStatus();
+
     await ensureSupabaseAuth();
 
     const rpcParams = (overrides) => ({
         p_assigned_staff_id: null, p_client_gender: null, p_coach_id: null,
-        p_ghost_days: null, p_ghost_only: false, p_last_interaction: null,
+        p_ghost_days: null, p_ghost_only: false, p_last_interaction: "today",
         p_last_interaction_from: null, p_last_interaction_to: null,
-        p_last_message_from: "client", p_limit: 1, p_no_assigned_staff: false,
+        p_last_message_from: null, p_limit: 1, p_no_assigned_staff: false,
         p_offset: 0, p_package_id: null, p_search: null, p_staff_id: null,
         p_subscription_start_date: null, p_subscription_start_weekday: null,
         p_subscription_status: null, p_subscription_t_status: null,
@@ -752,10 +832,14 @@ async function takeDemandSnapshot() {
             const demandCount = error ? 0 : (data?.total || 0);
 
             await sql`
-                INSERT INTO demand_snapshots (snapshot_date, agent_id, agent_name, demand_count)
-                VALUES (${today}, ${agent.id}, ${agent.name}, ${demandCount})
+                INSERT INTO demand_snapshots (snapshot_date, agent_id, agent_name, demand_count, cutoff_demand_count)
+                VALUES (${today}, ${agent.id}, ${agent.name}, ${demandCount}, ${isPastCutoff ? demandCount : null})
                 ON CONFLICT (snapshot_date, agent_id)
-                DO UPDATE SET demand_count = ${demandCount}, agent_name = ${agent.name}, created_at = NOW()
+                DO UPDATE SET
+                    demand_count = ${demandCount},
+                    agent_name = ${agent.name},
+                    cutoff_demand_count = COALESCE(demand_snapshots.cutoff_demand_count, EXCLUDED.cutoff_demand_count),
+                    created_at = NOW()
             `;
 
             results.push({ agent_id: agent.id, agent_name: agent.name, demand_count: demandCount });
@@ -1106,6 +1190,7 @@ app.listen(PORT, async () => {
                 UNIQUE(snapshot_date, agent_id)
             )
         `;
+        await sql`ALTER TABLE demand_snapshots ADD COLUMN IF NOT EXISTS cutoff_demand_count INTEGER DEFAULT NULL`;
 
         // Agent salary definition
         await sql`
@@ -1254,23 +1339,17 @@ app.listen(PORT, async () => {
         const SHIFT_TIMEOUT_CHECK_MS = 5 * 60 * 1000;
         setInterval(checkShiftTimeouts, SHIFT_TIMEOUT_CHECK_MS);
 
-        // Daily demand snapshot — runs every hour, saves once per day
-        const SNAPSHOT_CHECK_MS = 60 * 60 * 1000;
+        // Demand snapshot — runs every hour, always updates today's count
+        const SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
         setInterval(async () => {
             try {
-                const today = formatLocalDate(new Date());
-                const existing = await sql`
-                    SELECT 1 FROM demand_snapshots WHERE snapshot_date = ${today} LIMIT 1
-                `;
-                if (existing.length === 0) {
-                    console.log("Taking daily demand snapshot...");
-                    const result = await takeDemandSnapshot();
-                    console.log(`Demand snapshot saved: ${result.saved} agents for ${result.snapshot_date}`);
-                }
+                console.log("Taking hourly demand snapshot...");
+                const result = await takeDemandSnapshot();
+                console.log(`Demand snapshot updated: ${result.saved} agents for ${result.snapshot_date}`);
             } catch (err) {
                 console.error("Auto demand snapshot failed:", err.message);
             }
-        }, SNAPSHOT_CHECK_MS);
+        }, SNAPSHOT_INTERVAL_MS);
 
         console.log("Database schema ready.");
     } catch (err) {
@@ -1370,6 +1449,15 @@ function formatLocalDate(d) {
     const month = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+}
+
+async function getSlaCutoffStatus() {
+    const rows = await sql`SELECT value FROM settings WHERE key = 'sla_cutoff_time'`;
+    const slaCutoffTime = rows[0]?.value || '18:00';
+    const [cutH, cutM] = slaCutoffTime.split(':').map(Number);
+    const now = new Date();
+    const isPastCutoff = now.getHours() > cutH || (now.getHours() === cutH && now.getMinutes() >= cutM);
+    return { slaCutoffTime, cutH, cutM, isPastCutoff };
 }
 
 function getDateRange(period, dateStr) {

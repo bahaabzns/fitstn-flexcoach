@@ -24,3 +24,4 @@
 | 17 | MEDIUM | innerHTML used with server-returned strings without HTML escaping — XSS risk (pre-existing across all admin pages) | server/public/*.html | 2026-04-05 | ✅ RESOLVED 2026-04-06 — added escapeHtml() to all 9 admin pages, wrapped 24 dynamic values |
 | 14 | MEDIUM | N+1 query pattern — sessions fetched per-shift in a loop (1 DB query per shift) in /api/shifts, /api/agent-overview | server/index.js, server/routes/agent-overview.js | 2026-04-06 | OPEN |
 | 15 | LOW | SQL CTE in shifts.js and JS function in shift-utils.js implement same idle algorithm in two languages — keep in sync | server/routes/shifts.js, server/utils/shift-utils.js | 2026-04-06 | OPEN |
+| 18 | LOW | MAX_ROOMS_PER_FETCH=500 cap — if agent has >500 pending rooms, cutoff split and oldest-pending will be inaccurate | server/index.js | 2026-04-06 | OPEN |

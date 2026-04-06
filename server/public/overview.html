@@ -969,22 +969,29 @@
                 }
 
                 const cutoffLabel = data.sla_cutoff_time || '--:--';
-                const hoursLeft = data.hours_remaining;
-                const isPast = data.is_past_cutoff;
                 const avgMin = data.avg_minutes_per_chat;
+                const isPastCutoff = data.is_past_cutoff;
 
                 summaryLabel.innerHTML = 'SLA Cutoff: <span>' + cutoffLabel + '</span>' +
-                    (isPast
-                        ? ' &mdash; <span style="color:#dc3545;">Past cutoff — remaining chats shift to tomorrow</span>'
-                        : ' &mdash; <span>' + hoursLeft + 'h remaining</span>') +
+                    (isPastCutoff ? ' &mdash; <span style="color:#dc3545;">Past cutoff</span>' : '') +
                     ' &nbsp;|&nbsp; Avg per chat: <span>' + avgMin + ' min</span>' +
                     ' &nbsp;|&nbsp; Capacity: <span>' + data.max_chats_per_hour + ' chats/hr</span>';
 
-                const sorted = [...data.agents].sort((a, b) => b.workload_ratio - a.workload_ratio);
+                const sorted = [...data.agents].sort((a, b) => b.pending_count - a.pending_count);
 
                 container.innerHTML = sorted.map(function(agent) {
-                    const barWidth = Math.min(100, Math.round(agent.workload_ratio * 100));
-                    const paceLabel = isPast ? '—' : (agent.required_pace + ' chats/hr needed');
+                    const barWidth = Math.min(100, agent.completion_pct);
+                    const barStatus = agent.completion_pct >= 70 ? 'comfortable' : (agent.completion_pct >= 40 ? 'busy' : 'overloaded');
+                    const isPastShift = agent.hours_remaining === 0;
+                    const paceLabel = isPastShift ? 'Shift ended' : (agent.required_pace + ' chats/hr needed');
+                    const shiftInfo = 'Shift ends: ' + (agent.shift_end_time || '--:--') + (isPastShift ? '' : ' (' + agent.hours_remaining + 'h left)');
+
+                    // Demand row: yesterday | today | tomorrow (after cutoff)
+                    const demandLine = '<span style="color:#888;">Yesterday: <strong>' + agent.yesterday_demand + '</strong></span>' +
+                        ' &nbsp;|&nbsp; Today: <strong>' + agent.daily_demand + '</strong>';
+                    if (agent.tomorrow_demand != null) {
+                        demandLine += ' &nbsp;|&nbsp; <span style="color:#fd7e14;">Tomorrow: <strong>' + agent.tomorrow_demand + '</strong></span>';
+                    }
 
                     return '<div class="workload-card status-' + agent.status + '">' +
                         '<div class="wl-header">' +
@@ -992,11 +999,19 @@
                             '<span class="wl-badge ' + agent.status + '">' + agent.status + '</span>' +
                         '</div>' +
                         '<div class="wl-stats">' +
-                            '<strong>' + agent.demand_count + '</strong> chats waiting<br>' +
+                            demandLine + '<br>' +
+                            'Handled: <strong>' + agent.handled_count + '</strong> &nbsp;|&nbsp; Pending: <strong>' + agent.pending_count + '</strong>' +
+                            (agent.pending_after_cutoff != null
+                                ? ' <span style="font-size:12px;color:#888;">(' + agent.pending_before_cutoff + ' before cutoff, <span style="color:#fd7e14;">' + agent.pending_after_cutoff + ' after</span>)</span>'
+                                : '') +
+                            (agent.oldest_pending_at && agent.pending_before_cutoff > 0
+                                ? ' <span style="font-size:11px;color:#dc3545;">oldest: ' + new Date(agent.oldest_pending_at).toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'}) + '</span>'
+                                : '') + '<br>' +
                             paceLabel + '<br>' +
-                            'Load: <strong>' + Math.round(agent.workload_ratio * 100) + '%</strong>' +
+                            '<span style="font-size:12px;color:#666;">' + shiftInfo + '</span>' +
                         '</div>' +
-                        '<div class="wl-bar"><div class="wl-bar-fill ' + agent.status + '" style="width:' + barWidth + '%"></div></div>' +
+                        '<div class="wl-bar"><div class="wl-bar-fill ' + barStatus + '" style="width:' + barWidth + '%"></div></div>' +
+                        '<div style="text-align:right; font-size:12px; color:#555; margin-top:4px;">' + agent.completion_pct + '% done</div>' +
                     '</div>';
                 }).join('');
 
