@@ -53,3 +53,19 @@
 - Whether innerHTML without escaping is a real risk when data is admin-controlled
 **Question I want to explore next:** Building a shared escapeHtml() utility and applying it across all admin pages (DEBT #13)
 **Confidence today (1–10):** 8
+
+## 2026-04-05 — Session 4 Close
+
+**What we built:** Off-session work button (manual session close), break-block guard on chat clicks, renamed "Between Sessions" → "Off-session work" across all UI.
+**New concepts learned:**
+- Reusing existing endpoints for new features — no server changes needed for the off-session button (closeSessionViaApi already existed)
+- UI state guards: checking `currentStatus` before allowing actions (break-block pattern)
+- Extracting shared utility functions from duplicate code (showToast boy scout refactor)
+**Concepts I understood immediately:**
+- Button visibility driven by existing status polling — no new polling needed
+- Consistent label renaming across multiple files (5 files, search-and-replace discipline)
+**Concepts I am still fuzzy on:**
+- closeSessionViaApi() inner .catch(() => {}) silently swallows errors — need to fix this for proper error propagation
+- Performance of status polling at scale still an open question
+**Question I want to explore next:** Fixing silent error swallowing in closeSessionViaApi (DEBT #13) and setting up a test suite (DEBT #2)
+**Confidence today (1–10):** 8

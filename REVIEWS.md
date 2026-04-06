@@ -10,6 +10,7 @@
 |------|---------------|----------------|--------|
 | 2026-04-05 | Agent status differentiation (in_session/between_sessions/idle) | 1 — `isAgentSignedInAndOnShift()` still referenced old `"active"` status | Yes — fixed before commit |
 | 2026-04-05 | Activity log page + shift time breakdown (idle/off-session) | 0 blockers, 3 warnings (duplicate SQL, duplicate WHERE, innerHTML XSS) | Warnings logged in DEBT.md #11-13 |
+| 2026-04-05 | Off-session work button + break-block + label rename | 0 blockers, 2 warnings (duplicate toast, silent catch) | #12 resolved (Boy Scout), #13 logged in DEBT.md |
 
 ---
 
