@@ -122,3 +122,21 @@
 - postgres.js SQL fragment interpolation edge cases (carried over)
 **Question I want to explore next:** Setting up a test suite (DEBT #2) — still the biggest gap. Also fixing the N+1 query pattern (DEBT #14) with a batch query approach.
 **Confidence today (1–10):** 9
+
+## 2026-04-06 — Session 7 (Agent Workload Overhaul)
+
+**What we built:** Overhauled agent workload feature — per-agent shift_end_time for hours remaining, yesterday/today/tomorrow demand timeline, cutoff demand freezing via `cutoff_demand_count`, pending before/after cutoff split with room-level timestamp analysis, oldest pending chat indicator.
+**New concepts learned:**
+- COALESCE in ON CONFLICT UPDATE — freezing a value on first write and preserving it on subsequent upserts (`COALESCE(table.col, EXCLUDED.col)`)
+- Client-side timestamp splitting — fetching room objects from RPC and comparing `last_client_message_at` against a cutoff timestamp to split rooms into before/after buckets
+- Cold start problem with snapshot-based features — deploying after cutoff means first snapshot equals current demand, producing `0` difference. Self-corrects next cycle.
+- FlexCoach RPC `p_last_interaction` presets: only `"today"`, `"yesterday"`, `"week"` work; date ranges via `_from/_to` are ignored
+**Concepts I understood immediately:**
+- Per-agent shift_end_time replacing global cutoff for hours_remaining calculation
+- Yesterday demand as simple DB lookup from previous day's snapshot row
+- Extracting shared helper (`getSlaCutoffStatus()`) to eliminate duplicate cutoff logic
+**Concepts I am still fuzzy on:**
+- Whether p_limit=500 is sufficient for all agents (DEBT #18)
+- postgres.js SQL fragment interpolation edge cases (carried over)
+**Question I want to explore next:** Setting up a test suite (DEBT #2). Also pagination for the cutoff split if agents exceed 500 pending.
+**Confidence today (1–10):** 9
