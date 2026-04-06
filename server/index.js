@@ -86,11 +86,33 @@ const sql = process.env.DATABASE_URL
 // Auth middleware
 const { requireAdmin, requireAgent } = require("./middleware/auth")(sql);
 
+// Settings cache — avoids querying DB on every status poll
+const settingsCache = { data: null, lastFetchedAt: 0 };
+const SETTINGS_CACHE_TTL_MS = 60_000; // 1 minute
+
+async function getCachedSettings() {
+    const now = Date.now();
+    if (settingsCache.data && (now - settingsCache.lastFetchedAt) < SETTINGS_CACHE_TTL_MS) {
+        return settingsCache.data;
+    }
+    const rows = await sql`SELECT key, value FROM settings`;
+    const settings = {};
+    for (const row of rows) settings[row.key] = row.value;
+    settingsCache.data = settings;
+    settingsCache.lastFetchedAt = now;
+    return settings;
+}
+
+function invalidateSettingsCache() {
+    settingsCache.data = null;
+    settingsCache.lastFetchedAt = 0;
+}
+
 // Route modules
 const adminAuthRoutes = require("./routes/admin-auth")(sql);
 const agentAuthRoutes = require("./routes/agent-auth")(sql, requireAgent);
 const agentRoutes = require("./routes/agents")(sql, requireAdmin);
-const shiftRoutes = require("./routes/shifts")(sql, requireAgent);
+const shiftRoutes = require("./routes/shifts")(sql, requireAgent, getCachedSettings);
 const salaryRoutes = require("./routes/salaries")(sql, requireAdmin);
 const agentOverviewRoutes = require("./routes/agent-overview")(sql);
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
@@ -170,9 +192,9 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 a.name ASC
         `;
 
-        // Fetch activity threshold from settings
-        const thresholdRow = await sql`SELECT value FROM settings WHERE key = 'idle_warning_minutes'`;
-        const activityThresholdSeconds = (parseInt(thresholdRow[0]?.value) || 5) * 60;
+        // Fetch activity threshold from settings (cached)
+        const settings = await getCachedSettings();
+        const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
 
         const rows = result.map(row => {
             const onShift = !!row.shift_id;
@@ -915,6 +937,8 @@ app.put("/api/settings", requireAdmin, async (req, res) => {
                 ON CONFLICT (key) DO UPDATE SET value = ${value}, updated_at = NOW()
             `;
         }
+
+        invalidateSettingsCache();
 
         res.json({ success: true });
     } catch (err) {

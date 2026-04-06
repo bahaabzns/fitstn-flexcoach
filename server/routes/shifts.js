@@ -1,6 +1,6 @@
 const express = require("express");
 
-module.exports = function (sql, requireAgent) {
+module.exports = function (sql, requireAgent, getCachedSettings) {
     const router = express.Router();
 
     router.post("/start-shift", requireAgent, async (req, res) => {
@@ -299,11 +299,9 @@ module.exports = function (sql, requireAgent) {
                 ? Math.min(lastSession[0].idle_since_seconds, shiftDurationSeconds)
                 : shiftDurationSeconds;
 
-            // Fetch activity threshold (idle_warning_minutes) from settings
-            const thresholdRow = await sql`
-                SELECT value FROM settings WHERE key = 'idle_warning_minutes'
-            `;
-            const activityThresholdSeconds = (parseInt(thresholdRow[0]?.value) || 5) * 60;
+            // Fetch activity threshold (idle_warning_minutes) from cached settings
+            const settings = await getCachedSettings();
+            const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
 
             const isIdle = idleSinceSeconds >= activityThresholdSeconds;
             const totalBreakSeconds = completedBreakSeconds;
