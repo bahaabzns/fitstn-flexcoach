@@ -88,3 +88,18 @@
 - The two different idle calculation approaches (event-based in index.js vs remainder in agent-overview.js) — needs a design decision to unify
 **Question I want to explore next:** Setting up a test suite (DEBT #2) — biggest remaining debt item. Also input validation across route handlers (DEBT #5).
 **Confidence today (1–10):** 9
+
+## 2026-04-06 — Session 6 (Bug Fix)
+
+**What we fixed:** CORS blocking all chrome extension content script requests — `Error: Not allowed by CORS` spamming the server console on every request from the extension.
+**New concepts learned:**
+- Content scripts injected into a page send the **host page's origin** (e.g., `https://fitstn.flexcoach.app`), not the `chrome-extension://` origin — only popup/background scripts use the extension origin
+- CORS allowlists must include the actual host page URL when content scripts make fetch requests
+**Concepts I understood immediately:**
+- The CORS origin callback pattern — `startsWith` matching against an allowlist
+- Reading stack traces to pinpoint the exact line causing errors (index.js:133)
+**Concepts I am still fuzzy on:**
+- postgres.js SQL fragment interpolation edge cases (carried over from session 5)
+- Two different idle calculation approaches still need design decision (carried over)
+**Question I want to explore next:** Setting up a test suite (DEBT #2). Also the Boy Scout suggestion from this session: replace CORS Error objects with single-line console.warn to reduce console noise.
+**Confidence today (1–10):** 9
