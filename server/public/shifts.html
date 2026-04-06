@@ -105,30 +105,38 @@
     <table>
         <thead>
             <tr>
-                <th>ID</th>
-                <th>Agent</th>
-                <th>Started At</th>
-                <th>Ended At</th>
-                <th>Total Duration</th>
-                <th>In-session</th>
-                <th>Off-session work</th>
-                <th>Idle</th>
-                <th>Break</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th rowspan="2">ID</th>
+                <th rowspan="2">Agent</th>
+                <th rowspan="2">Started At</th>
+                <th rowspan="2">Ended At</th>
+                <th rowspan="2">Total Shift Duration</th>
+                <th colspan="3" style="text-align:center; background:#2d6a4f;">Active Shift</th>
+                <th colspan="3" style="text-align:center; background:#922b21;">In-Active Shift</th>
+                <th rowspan="2">Status</th>
+                <th rowspan="2">Actions</th>
+            </tr>
+            <tr>
+                <th style="background:#40916c;">Total</th>
+                <th style="background:#52b788; font-weight:normal; font-size:12px;">In-Session</th>
+                <th style="background:#52b788; font-weight:normal; font-size:12px;">Off-Session</th>
+                <th style="background:#c0392b;">Total</th>
+                <th style="background:#e74c3c; font-weight:normal; font-size:12px;">On Break</th>
+                <th style="background:#e74c3c; font-weight:normal; font-size:12px;">Idle</th>
             </tr>
         </thead>
         <tbody id="shifts-body">
-            <tr><td colspan="11" class="empty">Loading...</td></tr>
+            <tr><td colspan="13" class="empty">Loading...</td></tr>
         </tbody>
         <tfoot id="shifts-totals" style="display:none;">
             <tr style="background:#f0f0f0; font-weight:bold;">
                 <td colspan="4" style="text-align:right;">Totals</td>
                 <td id="total-duration">-</td>
+                <td id="total-active-shift">-</td>
                 <td id="total-in-session">-</td>
                 <td id="total-off-session">-</td>
-                <td id="total-idle">-</td>
+                <td id="total-inactive-shift">-</td>
                 <td id="total-break">-</td>
+                <td id="total-idle">-</td>
                 <td colspan="2"></td>
             </tr>
         </tfoot>
@@ -204,12 +212,12 @@
                 renderPeriodLabel(response.period);
                 const data = response.shifts;
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="11" class="empty">No shifts for this period.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="13" class="empty">No shifts for this period.</td></tr>';
                     document.getElementById('shifts-totals').style.display = 'none';
                     return;
                 }
 
-                let sumDuration = 0, sumActive = 0, sumOffSession = 0, sumIdle = 0, sumBreak = 0;
+                let sumDuration = 0, sumActiveShift = 0, sumInactiveShift = 0, sumInSession = 0, sumOffSession = 0, sumBreak = 0, sumIdle = 0;
 
                 tbody.innerHTML = data.map(row => {
                     const isActive = !row.shift_ended_at;
@@ -224,16 +232,23 @@
                         ? row.off_session_seconds
                         : Math.max(0, grossSeconds - activeSeconds - breakSeconds - idleSeconds);
 
+                    const activeShiftSec = activeSeconds + offSessionSeconds;
+                    const inactiveShiftSec = idleSeconds + breakSeconds;
+
                     sumDuration += grossSeconds;
-                    sumActive += activeSeconds;
+                    sumActiveShift += activeShiftSec;
+                    sumInactiveShift += inactiveShiftSec;
+                    sumInSession += activeSeconds;
+                    sumOffSession += offSessionSeconds;
                     sumBreak += breakSeconds;
                     sumIdle += idleSeconds;
-                    sumOffSession += offSessionSeconds;
 
-                    const inSession = formatDuration(activeSeconds);
+                    const activeShiftDisplay = activeShiftSec > 0 ? formatDuration(activeShiftSec) : '-';
+                    const inactiveShiftDisplay = inactiveShiftSec > 0 ? formatDuration(inactiveShiftSec) : '-';
+                    const inSessionDisplay = activeSeconds > 0 ? formatDuration(activeSeconds) : '-';
                     const offSessionDisplay = offSessionSeconds > 0 ? formatDuration(offSessionSeconds) : '-';
+                    const breakDisplay = breakSeconds > 0 ? formatDuration(breakSeconds) : '-';
                     const idleDisplay = idleSeconds > 0 ? formatDuration(idleSeconds) : '-';
-                    const breakDuration = breakSeconds > 0 ? formatDuration(breakSeconds) : '-';
                     const startedIso = new Date(row.shift_started_at).toISOString().slice(0, 16);
                     const endedIso = row.shift_ended_at ? new Date(row.shift_ended_at).toISOString().slice(0, 16) : '';
                     return `
@@ -243,10 +258,12 @@
                             <td>${formatArabicDateTime(new Date(row.shift_started_at))}</td>
                             <td>${isActive ? "-" : formatArabicDateTime(new Date(row.shift_ended_at))}</td>
                             <td>${duration}</td>
-                            <td>${inSession}</td>
-                            <td>${offSessionDisplay}</td>
-                            <td>${idleDisplay}</td>
-                            <td>${breakDuration}</td>
+                            <td><strong>${activeShiftDisplay}</strong></td>
+                            <td style="color:#666;">${inSessionDisplay}</td>
+                            <td style="color:#666;">${offSessionDisplay}</td>
+                            <td><strong>${inactiveShiftDisplay}</strong></td>
+                            <td style="color:#666;">${breakDisplay}</td>
+                            <td style="color:#666;">${idleDisplay}</td>
                             <td><span class="badge ${isActive ? 'badge-active' : 'badge-ended'}">${isActive ? 'Active' : 'Ended'}</span></td>
                             <td><button class="btn-edit" onclick="openEditModal(${row.id}, '${startedIso}', '${endedIso}')">Edit</button></td>
                         </tr>
@@ -256,12 +273,14 @@
                 // Render totals row
                 document.getElementById('shifts-totals').style.display = '';
                 document.getElementById('total-duration').textContent = formatDuration(sumDuration);
-                document.getElementById('total-in-session').textContent = formatDuration(sumActive);
+                document.getElementById('total-active-shift').textContent = formatDuration(sumActiveShift);
+                document.getElementById('total-in-session').textContent = formatDuration(sumInSession);
                 document.getElementById('total-off-session').textContent = formatDuration(sumOffSession);
-                document.getElementById('total-idle').textContent = formatDuration(sumIdle);
+                document.getElementById('total-inactive-shift').textContent = formatDuration(sumInactiveShift);
                 document.getElementById('total-break').textContent = formatDuration(sumBreak);
+                document.getElementById('total-idle').textContent = formatDuration(sumIdle);
             } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="11" class="empty">Failed to load shifts.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="13" class="empty">Failed to load shifts.</td></tr>';
             }
         }
         document.getElementById('filter-date').value = new Date().toISOString().slice(0, 10);

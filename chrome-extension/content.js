@@ -252,11 +252,16 @@ function createStatusBadge() {
                     <span id="fc-status-label" style="font-size:13px; font-weight:700; color:#fca5a5; letter-spacing:0.3px;">Not Signed In</span>
                     <span id="fc-status-detail" style="font-size:12px; color:#94a3b8; display:none;"></span>
                 </div>
-                <div id="fc-shift-times" style="display:none; margin-top:2px; font-size:11px; color:#94a3b8; gap:12px;">
+                <div id="fc-shift-times" style="display:none; margin-top:2px; font-size:11px; color:#94a3b8; gap:14px; flex-wrap:wrap;">
                     <span><span style="color:#64748b;">Shift:</span> <strong id="fc-time-shift" style="color:#e2e8f0;">--</strong></span>
-                    <span><span style="color:#64748b;">Active:</span> <strong id="fc-time-active" style="color:#4ade80;">--</strong></span>
-                    <span><span style="color:#64748b;">Off-session work:</span> <strong id="fc-time-idle" style="color:#facc15;">--</strong></span>
-                    <span><span style="color:#64748b;">Break:</span> <strong id="fc-time-break" style="color:#a78bfa;">--</strong></span>
+                    <span style="border-left:1px solid #334155; padding-left:10px;">
+                        <span style="color:#64748b;">Active:</span> <strong id="fc-time-active-shift" style="color:#4ade80;">--</strong>
+                        <span style="font-size:9px; color:#64748b; margin-left:4px;">(<span id="fc-time-insession" style="color:#86efac;">--</span> + <span id="fc-time-offsession" style="color:#facc15;">--</span>)</span>
+                    </span>
+                    <span style="border-left:1px solid #334155; padding-left:10px;">
+                        <span style="color:#64748b;">In-Active:</span> <strong id="fc-time-inactive-shift" style="color:#f87171;">--</strong>
+                        <span style="font-size:9px; color:#64748b; margin-left:4px;">(<span id="fc-time-break" style="color:#a78bfa;">--</span> + <span id="fc-time-idle" style="color:#f87171;">--</span>)</span>
+                    </span>
                 </div>
             </div>
         </div>
@@ -653,7 +658,11 @@ async function updateStatusBadge() {
         const detail = document.getElementById("fc-status-detail");
         const shiftTimesContainer = document.getElementById("fc-shift-times");
         const timeShift = document.getElementById("fc-time-shift");
-        const timeActive = document.getElementById("fc-time-active");
+        const timeActiveShift = document.getElementById("fc-time-active-shift");
+        const timeInactiveShift = document.getElementById("fc-time-inactive-shift");
+        const timeInSession = document.getElementById("fc-time-insession");
+        const timeOffSession = document.getElementById("fc-time-offsession");
+        const timeBreak = document.getElementById("fc-time-break");
         const timeIdle = document.getElementById("fc-time-idle");
         if (!statusCard || !dot || !label || !detail) return;
 
@@ -694,11 +703,19 @@ async function updateStatusBadge() {
         const isOnShift = !!data.shift_duration_seconds;
         const isOnBreak = data.status === "on_break";
         if (isOnShift && shiftTimesContainer) {
-            const timeBreak = document.getElementById("fc-time-break");
             timeShift.textContent = formatStatusDuration(data.shift_duration_seconds || 0);
-            timeActive.textContent = formatStatusDuration(data.total_active_seconds || 0);
-            timeIdle.textContent = formatStatusDuration(data.idle_duration_seconds || 0);
-            if (timeBreak) timeBreak.textContent = formatStatusDuration(data.total_break_seconds || 0);
+            const inSessionSec = data.total_active_seconds || 0;
+            const offSessionSec = data.off_session_seconds || 0;
+            const breakSec = data.total_break_seconds || 0;
+            const idleSec = data.idle_seconds || 0;
+            const activeShiftSec = inSessionSec + offSessionSec;
+            const inactiveShiftSec = idleSec + breakSec;
+            if (timeActiveShift) timeActiveShift.textContent = formatStatusDuration(activeShiftSec);
+            if (timeInactiveShift) timeInactiveShift.textContent = formatStatusDuration(inactiveShiftSec);
+            if (timeInSession) timeInSession.textContent = formatStatusDuration(inSessionSec);
+            if (timeOffSession) timeOffSession.textContent = formatStatusDuration(offSessionSec);
+            if (timeBreak) timeBreak.textContent = formatStatusDuration(breakSec);
+            if (timeIdle) timeIdle.textContent = formatStatusDuration(idleSec);
             shiftTimesContainer.style.display = "flex";
         } else if (shiftTimesContainer) {
             shiftTimesContainer.style.display = "none";

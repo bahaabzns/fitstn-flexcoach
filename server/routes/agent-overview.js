@@ -1,6 +1,7 @@
 const express = require("express");
+const { computeGapIdle } = require("../utils/shift-utils");
 
-module.exports = function (sql) {
+module.exports = function (sql, getCachedSettings) {
     const router = express.Router();
 
     // Allow both admin and agent (agent can only view their own data)
@@ -112,7 +113,41 @@ module.exports = function (sql) {
             const totalSessions = sessionData.reduce((sum, r) => sum + r.session_count, 0);
             const totalActiveSeconds = sessionData.reduce((sum, r) => sum + (r.active_seconds || 0), 0);
             const totalMessages = sessionData.reduce((sum, r) => sum + (r.total_messages || 0), 0);
-            const totalIdleSeconds = Math.max(0, totalShiftSeconds - totalActiveInShift - totalBreakSeconds);
+
+            // Gap-based idle: fetch all shifts and sessions for this agent in period, compute idle per shift
+            const settings = await getCachedSettings();
+            const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
+
+            const allShiftsInPeriod = await sql`
+                SELECT id, agent_id, shift_started_at, shift_ended_at
+                FROM shifts
+                WHERE agent_id = ${agentId}
+                AND shift_started_at >= ${startDate}::date
+                AND shift_started_at < ${endDate}::date + INTERVAL '1 day'
+                ORDER BY shift_started_at
+            `;
+
+            let totalIdleSeconds = 0;
+            const idleByDate = {};
+            for (const sh of allShiftsInPeriod) {
+                const shiftEnd = sh.shift_ended_at || new Date();
+                const sessions = await sql`
+                    SELECT clicked_at, ended_at FROM sessions
+                    WHERE agent_id = ${sh.agent_id}
+                    AND ended_at IS NOT NULL
+                    AND clicked_at < ${shiftEnd}
+                    AND ended_at > ${sh.shift_started_at}
+                    ORDER BY clicked_at
+                `;
+                const shiftIdleSeconds = computeGapIdle(sh.shift_started_at, shiftEnd, sessions, activityThresholdSeconds);
+                totalIdleSeconds += shiftIdleSeconds;
+                const dateKey = formatLocalDate(new Date(sh.shift_started_at));
+                idleByDate[dateKey] = (idleByDate[dateKey] || 0) + shiftIdleSeconds;
+            }
+
+            const totalRemainderSeconds = Math.max(0, totalShiftSeconds - totalActiveInShift - totalBreakSeconds);
+            totalIdleSeconds = Math.min(totalIdleSeconds, totalRemainderSeconds);
+            const totalOffSessionSeconds = Math.max(0, totalRemainderSeconds - totalIdleSeconds);
             const effectiveShiftSeconds = Math.max(0, totalShiftSeconds - totalBreakSeconds);
             const productivityPercentage = effectiveShiftSeconds > 0
                 ? Math.round((totalActiveInShift / effectiveShiftSeconds) * 100)
@@ -124,7 +159,7 @@ module.exports = function (sql) {
                 ? Math.round((totalMessages / totalSessions) * 10) / 10
                 : 0;
 
-            const dailyBreakdown = buildDailyBreakdown(startDate, endDate, shiftData, sessionData);
+            const dailyBreakdown = buildDailyBreakdown(startDate, endDate, shiftData, sessionData, idleByDate);
 
             const selectedMonth = dateParam.slice(0, 7);
             let salaryInfo = null;
@@ -211,11 +246,29 @@ module.exports = function (sql) {
                 ORDER BY sh.shift_started_at DESC
             `;
 
-            const shiftsWithIdle = shiftsList.map(sh => ({
-                ...sh,
-                break_seconds: sh.break_seconds || 0,
-                idle_seconds: Math.max(0, sh.duration_seconds - sh.active_seconds - (sh.break_seconds || 0))
-            }));
+            const shiftsWithIdle = [];
+            for (const sh of shiftsList) {
+                const shiftEnd = sh.shift_ended_at || new Date();
+                const shiftSessions = await sql`
+                    SELECT clicked_at, ended_at FROM sessions
+                    WHERE agent_id = ${agentId}
+                    AND ended_at IS NOT NULL
+                    AND clicked_at < ${shiftEnd}
+                    AND ended_at > ${sh.shift_started_at}
+                    ORDER BY clicked_at
+                `;
+                const rawIdleSec = computeGapIdle(sh.shift_started_at, shiftEnd, shiftSessions, activityThresholdSeconds);
+                const breakSec = sh.break_seconds || 0;
+                const remainder = Math.max(0, sh.duration_seconds - sh.active_seconds - breakSec);
+                const idleSec = Math.min(rawIdleSec, remainder);
+                const offSessionSec = Math.max(0, remainder - idleSec);
+                shiftsWithIdle.push({
+                    ...sh,
+                    break_seconds: breakSec,
+                    idle_seconds: idleSec,
+                    off_session_seconds: offSessionSec,
+                });
+            }
 
             // Response time metrics from activity events
             const responseTimeData = await sql`
@@ -243,6 +296,7 @@ module.exports = function (sql) {
                     total_active_seconds: totalActiveSeconds,
                     total_break_seconds: totalBreakSeconds,
                     total_idle_seconds: totalIdleSeconds,
+                    total_off_session_seconds: totalOffSessionSeconds,
                     productivity_percentage: productivityPercentage,
                     average_session_seconds: averageSessionSeconds,
                     average_messages_per_session: averageMessagesPerSession,
@@ -304,7 +358,7 @@ module.exports = function (sql) {
 
             const shifts = await sql`
                 SELECT
-                    sh.id, sh.shift_started_at, sh.shift_ended_at,
+                    sh.id, sh.agent_id, sh.shift_started_at, sh.shift_ended_at,
                     EXTRACT(EPOCH FROM (
                         COALESCE(sh.shift_ended_at, NOW()) - sh.shift_started_at
                     ))::int as duration_seconds,
@@ -322,26 +376,7 @@ module.exports = function (sql) {
                     ))), 0)::int
                     FROM shift_breaks sb
                     WHERE sb.shift_id = sh.id
-                    ) as break_seconds,
-                    (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
-                        LEAST(
-                            COALESCE(
-                                (SELECT MIN(ae2.created_at) FROM activity_events ae2
-                                 WHERE ae2.agent_id = sh.agent_id
-                                 AND ae2.event_type = 'idle_resumed'
-                                 AND ae2.created_at > ae_s.created_at
-                                 AND ae2.created_at <= COALESCE(sh.shift_ended_at, NOW())),
-                                COALESCE(sh.shift_ended_at, NOW())
-                            ),
-                            COALESCE(sh.shift_ended_at, NOW())
-                        ) - ae_s.created_at
-                    ))), 0)::int
-                    FROM activity_events ae_s
-                    WHERE ae_s.agent_id = sh.agent_id
-                    AND ae_s.event_type = 'idle_started'
-                    AND ae_s.created_at >= sh.shift_started_at
-                    AND ae_s.created_at < COALESCE(sh.shift_ended_at, NOW())
-                    ) as idle_event_seconds
+                    ) as break_seconds
                 FROM shifts sh
                 WHERE sh.agent_id = ${agentId}
                 AND sh.shift_started_at >= ${startDate}::date
@@ -349,17 +384,32 @@ module.exports = function (sql) {
                 ORDER BY sh.shift_started_at DESC
             `;
 
-            const shiftsWithIdle = shifts.map(sh => {
+            const shiftSettings = await getCachedSettings();
+            const shiftThresholdSeconds = (parseInt(shiftSettings.idle_warning_minutes) || 5) * 60;
+
+            const shiftsWithIdle = [];
+            for (const sh of shifts) {
+                const shiftEnd = sh.shift_ended_at || new Date();
+                const sessions = await sql`
+                    SELECT clicked_at, ended_at FROM sessions
+                    WHERE agent_id = ${sh.agent_id}
+                    AND ended_at IS NOT NULL
+                    AND clicked_at < ${shiftEnd}
+                    AND ended_at > ${sh.shift_started_at}
+                    ORDER BY clicked_at
+                `;
+                const rawIdleSeconds = computeGapIdle(sh.shift_started_at, shiftEnd, sessions, shiftThresholdSeconds);
                 const breakSeconds = sh.break_seconds || 0;
-                const idleEventSeconds = Math.min(sh.idle_event_seconds || 0, Math.max(0, sh.duration_seconds - sh.active_seconds - breakSeconds));
-                const offSessionSeconds = Math.max(0, sh.duration_seconds - sh.active_seconds - breakSeconds - idleEventSeconds);
-                return {
+                const remainderSeconds = Math.max(0, sh.duration_seconds - sh.active_seconds - breakSeconds);
+                const idleSeconds = Math.min(rawIdleSeconds, remainderSeconds);
+                const offSessionSeconds = Math.max(0, remainderSeconds - idleSeconds);
+                shiftsWithIdle.push({
                     ...sh,
                     break_seconds: breakSeconds,
-                    idle_seconds: idleEventSeconds,
+                    idle_seconds: idleSeconds,
                     off_session_seconds: offSessionSeconds,
-                };
-            });
+                });
+            }
 
             res.json({ period: { type: period, start: startDate, end: endDate }, shifts: shiftsWithIdle });
         } catch (err) {
@@ -405,7 +455,7 @@ function getDateRange(period, dateStr) {
     };
 }
 
-function buildDailyBreakdown(startDate, endDate, shiftData, sessionData) {
+function buildDailyBreakdown(startDate, endDate, shiftData, sessionData, idleByDate) {
     const shiftMap = {};
     shiftData.forEach(row => {
         const key = formatLocalDate(new Date(row.shift_date));
@@ -433,10 +483,15 @@ function buildDailyBreakdown(startDate, endDate, shiftData, sessionData) {
         const key = formatLocalDate(current);
         const shiftInfo = shiftMap[key] || { shift_seconds: 0, break_seconds: 0 };
         const sessionInfo = sessionMap[key] || { sessions: 0, active_seconds: 0, messages: 0 };
+        const dayRemainder = Math.max(0, shiftInfo.shift_seconds - sessionInfo.active_seconds - shiftInfo.break_seconds);
+        const dayIdleSeconds = Math.min(idleByDate[key] || 0, dayRemainder);
+        const dayOffSessionSeconds = Math.max(0, dayRemainder - dayIdleSeconds);
         days.push({
             date: key,
             shift_seconds: shiftInfo.shift_seconds,
             break_seconds: shiftInfo.break_seconds,
+            idle_seconds: dayIdleSeconds,
+            off_session_seconds: dayOffSessionSeconds,
             sessions: sessionInfo.sessions,
             active_seconds: sessionInfo.active_seconds,
             messages: sessionInfo.messages

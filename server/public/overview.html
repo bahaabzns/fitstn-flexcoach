@@ -693,20 +693,24 @@
                     <div class="value">${perf.total_sessions}</div>
                 </div>
                 <div class="summary-card">
-                    <div class="label">Total Shift</div>
+                    <div class="label">Total Shift Duration</div>
                     <div class="value">${formatDuration(perf.total_shift_seconds)}</div>
                 </div>
-                <div class="summary-card">
-                    <div class="label">In-session</div>
-                    <div class="value blue">${formatDuration(perf.total_active_seconds)}</div>
+                <div class="summary-card green" style="border-left:4px solid #28a745;">
+                    <div class="label">Active Shift</div>
+                    <div class="value">${formatDuration(perf.total_active_seconds + perf.total_off_session_seconds)}</div>
+                    <div style="margin-top:6px; font-size:12px; color:#666; display:flex; gap:12px;">
+                        <span>In-Session: <strong style="color:#28a745;">${formatDuration(perf.total_active_seconds)}</strong></span>
+                        <span>Off-Session: <strong style="color:#eab308;">${formatDuration(perf.total_off_session_seconds)}</strong></span>
+                    </div>
                 </div>
-                <div class="summary-card">
-                    <div class="label">Off-session work</div>
-                    <div class="value red">${formatDuration(perf.total_idle_seconds)}</div>
-                </div>
-                <div class="summary-card">
-                    <div class="label">On Break</div>
-                    <div class="value" style="color:#6366f1;">${formatDuration(perf.total_break_seconds)}</div>
+                <div class="summary-card red" style="border-left:4px solid #dc3545;">
+                    <div class="label">In-Active Shift</div>
+                    <div class="value">${formatDuration(perf.total_idle_seconds + perf.total_break_seconds)}</div>
+                    <div style="margin-top:6px; font-size:12px; color:#666; display:flex; gap:12px;">
+                        <span>On Break: <strong style="color:#6366f1;">${formatDuration(perf.total_break_seconds)}</strong></span>
+                        <span>Idle: <strong style="color:#dc3545;">${formatDuration(perf.total_idle_seconds)}</strong></span>
+                    </div>
                 </div>
                 <div class="summary-card green">
                     <div class="label">Productivity</div>
@@ -759,10 +763,8 @@
             const sessionsData = dailyBreakdown.map(d => d.sessions);
             const activeHours = dailyBreakdown.map(d => +(d.active_seconds / 3600).toFixed(2));
             const breakHours = dailyBreakdown.map(d => +((d.break_seconds || 0) / 3600).toFixed(2));
-            const idleHours = dailyBreakdown.map(d => {
-                const idle = d.shift_seconds - d.active_seconds - (d.break_seconds || 0);
-                return +(Math.max(0, idle) / 3600).toFixed(2);
-            });
+            const offSessionHours = dailyBreakdown.map(d => +((d.off_session_seconds || 0) / 3600).toFixed(2));
+            const idleHours = dailyBreakdown.map(d => +((d.idle_seconds || 0) / 3600).toFixed(2));
             const productivityData = dailyBreakdown.map(d => {
                 const effective = d.shift_seconds - (d.break_seconds || 0);
                 return effective > 0 ? Math.round((d.active_seconds / effective) * 100) : 0;
@@ -788,32 +790,43 @@
                 }
             });
 
-            // Active vs Idle vs Break stacked bar
+            // Activity stacked bar: Active Shift (In-Session + Off-Session) vs In-Active Shift (On Break + Idle)
             chartActivity = new Chart(document.getElementById('activityChart'), {
                 type: 'bar',
                 data: {
                     labels,
                     datasets: [
                         {
-                            label: 'In-session',
+                            label: 'In-Session Work',
                             data: activeHours,
                             backgroundColor: CHART_COLORS.green,
                             borderColor: CHART_COLORS.greenBorder,
-                            borderWidth: 1
+                            borderWidth: 1,
+                            stack: 'active'
                         },
                         {
-                            label: 'Off-session work',
-                            data: idleHours,
-                            backgroundColor: CHART_COLORS.gray,
-                            borderColor: CHART_COLORS.grayBorder,
-                            borderWidth: 1
+                            label: 'Off-Session Work',
+                            data: offSessionHours,
+                            backgroundColor: 'rgba(234, 179, 8, 0.5)',
+                            borderColor: 'rgba(234, 179, 8, 1)',
+                            borderWidth: 1,
+                            stack: 'active'
                         },
                         {
                             label: 'On Break',
                             data: breakHours,
                             backgroundColor: 'rgba(99, 102, 241, 0.5)',
                             borderColor: 'rgba(99, 102, 241, 1)',
-                            borderWidth: 1
+                            borderWidth: 1,
+                            stack: 'inactive'
+                        },
+                        {
+                            label: 'Idle',
+                            data: idleHours,
+                            backgroundColor: CHART_COLORS.red,
+                            borderColor: CHART_COLORS.redBorder,
+                            borderWidth: 1,
+                            stack: 'inactive'
                         }
                     ]
                 },
@@ -870,9 +883,6 @@
             } else {
                 document.getElementById('salary-history-box').style.display = 'none';
             }
-        }
-
-
         }
 
         // =====================

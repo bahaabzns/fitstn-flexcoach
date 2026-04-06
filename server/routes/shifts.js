@@ -246,11 +246,51 @@ module.exports = function (sql, requireAgent, getCachedSettings) {
             `;
             const completedActiveSeconds = Number(completedSessions[0].total_seconds);
 
+            // Fetch activity threshold (idle_warning_minutes) from cached settings
+            const settings = await getCachedSettings();
+            const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
+
+            // Gap-based idle: SQL CTE version of the algorithm in utils/shift-utils.js computeGapIdle()
+            // Each gap = time from one session ending to the next session starting (or NOW/shift_end)
+            // If gap > threshold → entire gap is "idle". If gap <= threshold → "off-session work".
+            const sessionGaps = await sql`
+                WITH shift_sessions AS (
+                    SELECT clicked_at, ended_at
+                    FROM sessions
+                    WHERE agent_id = ${agentId}
+                    AND ended_at IS NOT NULL
+                    AND clicked_at < NOW()
+                    AND ended_at > ${shiftStartedAt}
+                    ORDER BY clicked_at
+                ),
+                gaps AS (
+                    SELECT
+                        GREATEST(ended_at, ${shiftStartedAt}) AS gap_start,
+                        COALESCE(LEAD(clicked_at) OVER (ORDER BY clicked_at), NOW()) AS gap_end
+                    FROM shift_sessions
+                    UNION ALL
+                    SELECT
+                        ${shiftStartedAt}::timestamptz AS gap_start,
+                        COALESCE((SELECT MIN(clicked_at) FROM shift_sessions), NOW()) AS gap_end
+                )
+                SELECT
+                    COALESCE(SUM(
+                        CASE WHEN EXTRACT(EPOCH FROM (gap_end - gap_start)) >= ${activityThresholdSeconds}
+                             THEN EXTRACT(EPOCH FROM (gap_end - gap_start))
+                             ELSE 0 END
+                    ), 0)::int AS idle_gap_seconds
+                FROM gaps
+                WHERE gap_end > gap_start
+            `;
+            const rawIdleGapSeconds = Number(sessionGaps[0].idle_gap_seconds);
+
             // On break — return pre-computed durations
             if (activeBreak.length > 0) {
                 const currentBreakSeconds = activeBreak[0].current_break_seconds;
                 const totalBreakSeconds = completedBreakSeconds + currentBreakSeconds;
-                const idleSeconds = Math.max(0, shiftDurationSeconds - completedActiveSeconds - totalBreakSeconds);
+                const remainderSeconds = Math.max(0, shiftDurationSeconds - completedActiveSeconds - totalBreakSeconds);
+                const idleSeconds = Math.min(rawIdleGapSeconds, remainderSeconds);
+                const offSessionSeconds = Math.max(0, remainderSeconds - idleSeconds);
                 return res.json({
                     status: "on_break",
                     shift_started_at: shiftStartedAt,
@@ -258,7 +298,8 @@ module.exports = function (sql, requireAgent, getCachedSettings) {
                     current_break_seconds: currentBreakSeconds,
                     total_break_seconds: totalBreakSeconds,
                     total_active_seconds: completedActiveSeconds,
-                    idle_duration_seconds: idleSeconds,
+                    idle_seconds: idleSeconds,
+                    off_session_seconds: offSessionSeconds,
                 });
             }
 
@@ -275,7 +316,9 @@ module.exports = function (sql, requireAgent, getCachedSettings) {
                 const chatDurationSeconds = session[0].chat_duration_seconds;
                 const totalActiveSeconds = completedActiveSeconds + chatDurationSeconds;
                 const totalBreakSeconds = completedBreakSeconds;
-                const idleSeconds = Math.max(0, shiftDurationSeconds - totalActiveSeconds - totalBreakSeconds);
+                const remainderSeconds = Math.max(0, shiftDurationSeconds - totalActiveSeconds - totalBreakSeconds);
+                const idleSeconds = Math.min(rawIdleGapSeconds, remainderSeconds);
+                const offSessionSeconds = Math.max(0, remainderSeconds - idleSeconds);
                 return res.json({
                     status: "in_session",
                     chat_name: session[0].chat_name,
@@ -284,11 +327,12 @@ module.exports = function (sql, requireAgent, getCachedSettings) {
                     chat_duration_seconds: chatDurationSeconds,
                     total_active_seconds: totalActiveSeconds,
                     total_break_seconds: totalBreakSeconds,
-                    idle_duration_seconds: idleSeconds,
+                    idle_seconds: idleSeconds,
+                    off_session_seconds: offSessionSeconds,
                 });
             }
 
-            // No active session — determine between_sessions vs idle using activity threshold from settings
+            // No active session — determine between_sessions vs idle using activity threshold
             const lastSession = await sql`
                 SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - ended_at)))::int AS idle_since_seconds
                 FROM sessions
@@ -299,13 +343,11 @@ module.exports = function (sql, requireAgent, getCachedSettings) {
                 ? Math.min(lastSession[0].idle_since_seconds, shiftDurationSeconds)
                 : shiftDurationSeconds;
 
-            // Fetch activity threshold (idle_warning_minutes) from cached settings
-            const settings = await getCachedSettings();
-            const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
-
             const isIdle = idleSinceSeconds >= activityThresholdSeconds;
             const totalBreakSeconds = completedBreakSeconds;
-            const idleSeconds = Math.max(0, shiftDurationSeconds - completedActiveSeconds - totalBreakSeconds);
+            const remainderSeconds = Math.max(0, shiftDurationSeconds - completedActiveSeconds - totalBreakSeconds);
+            const idleSeconds = Math.min(rawIdleGapSeconds, remainderSeconds);
+            const offSessionSeconds = Math.max(0, remainderSeconds - idleSeconds);
             return res.json({
                 status: isIdle ? "idle" : "between_sessions",
                 shift_started_at: shiftStartedAt,
@@ -313,7 +355,8 @@ module.exports = function (sql, requireAgent, getCachedSettings) {
                 idle_since_seconds: idleSinceSeconds,
                 total_active_seconds: completedActiveSeconds,
                 total_break_seconds: totalBreakSeconds,
-                idle_duration_seconds: idleSeconds,
+                idle_seconds: idleSeconds,
+                off_session_seconds: offSessionSeconds,
             });
         } catch (err) {
             res.status(500).json({ error: "Failed to fetch status", details: err.message });

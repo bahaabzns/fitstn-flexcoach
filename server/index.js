@@ -114,9 +114,10 @@ const agentAuthRoutes = require("./routes/agent-auth")(sql, requireAgent);
 const agentRoutes = require("./routes/agents")(sql, requireAdmin);
 const shiftRoutes = require("./routes/shifts")(sql, requireAgent, getCachedSettings);
 const salaryRoutes = require("./routes/salaries")(sql, requireAdmin);
-const agentOverviewRoutes = require("./routes/agent-overview")(sql);
+const agentOverviewRoutes = require("./routes/agent-overview")(sql, getCachedSettings);
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
 const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin);
+const { computeGapIdle } = require("./utils/shift-utils");
 
 // CORS: restrict to known clients (dev + production + FlexCoach host page for content scripts)
 const ALLOWED_ORIGINS = [
@@ -251,6 +252,9 @@ app.get("/api/shifts", requireAdmin, async (req, res) => {
         const dateParam = req.query.date || new Date().toISOString().slice(0, 10);
         const { startDate, endDate } = getDateRange(period, dateParam);
 
+        const settings = await getCachedSettings();
+        const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
+
         const result = await sql`
             SELECT sh.*, a.email as agent_email, a.name as agent_name,
                 (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
@@ -267,45 +271,46 @@ app.get("/api/shifts", requireAdmin, async (req, res) => {
                 ))), 0)::int
                 FROM shift_breaks sb
                 WHERE sb.shift_id = sh.id
-                ) AS break_seconds,
-                (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
-                    LEAST(
-                        COALESCE(
-                            (SELECT MIN(ae2.created_at) FROM activity_events ae2
-                             WHERE ae2.agent_id = sh.agent_id
-                             AND ae2.event_type = 'idle_resumed'
-                             AND ae2.created_at > ae_s.created_at
-                             AND ae2.created_at <= COALESCE(sh.shift_ended_at, NOW())),
-                            COALESCE(sh.shift_ended_at, NOW())
-                        ),
-                        COALESCE(sh.shift_ended_at, NOW())
-                    ) - ae_s.created_at
-                ))), 0)::int
-                FROM activity_events ae_s
-                WHERE ae_s.agent_id = sh.agent_id
-                AND ae_s.event_type = 'idle_started'
-                AND ae_s.created_at >= sh.shift_started_at
-                AND ae_s.created_at < COALESCE(sh.shift_ended_at, NOW())
-                ) AS idle_event_seconds
+                ) AS break_seconds
             FROM shifts sh
             LEFT JOIN agents a ON sh.agent_id = a.id
             WHERE sh.shift_started_at >= ${startDate}::date
             AND sh.shift_started_at < ${endDate}::date + INTERVAL '1 day'
             ORDER BY sh.shift_started_at DESC
         `;
+
+        // Compute gap-based idle per shift using shared utility
+        const shiftIds = result.map(r => r.id);
+        let idleByShift = {};
+        if (shiftIds.length > 0) {
+            for (const row of result) {
+                const shiftEnd = row.shift_ended_at || new Date();
+                const sessions = await sql`
+                    SELECT clicked_at, ended_at FROM sessions
+                    WHERE agent_id = ${row.agent_id}
+                    AND ended_at IS NOT NULL
+                    AND clicked_at < ${shiftEnd}
+                    AND ended_at > ${row.shift_started_at}
+                    ORDER BY clicked_at
+                `;
+                idleByShift[row.id] = computeGapIdle(row.shift_started_at, shiftEnd, sessions, activityThresholdSeconds);
+            }
+        }
+
         const rows = result.map(row => {
             const shiftEnd = row.shift_ended_at ? new Date(row.shift_ended_at) : new Date();
             const shiftDuration = Math.round((shiftEnd - new Date(row.shift_started_at)) / 1000);
             const breakSeconds = row.break_seconds || 0;
             const activeSeconds = row.active_seconds || 0;
-            const idleEventSeconds = Math.min(row.idle_event_seconds || 0, Math.max(0, shiftDuration - activeSeconds - breakSeconds));
-            const offSessionSeconds = Math.max(0, shiftDuration - activeSeconds - breakSeconds - idleEventSeconds);
+            const remainderSeconds = Math.max(0, shiftDuration - activeSeconds - breakSeconds);
+            const idleSeconds = Math.min(idleByShift[row.id] || 0, remainderSeconds);
+            const offSessionSeconds = Math.max(0, remainderSeconds - idleSeconds);
             return {
                 ...row,
                 duration_seconds: row.shift_ended_at ? shiftDuration : null,
                 active_seconds: activeSeconds,
                 break_seconds: breakSeconds,
-                idle_seconds: idleEventSeconds,
+                idle_seconds: idleSeconds,
                 off_session_seconds: offSessionSeconds,
             };
         });

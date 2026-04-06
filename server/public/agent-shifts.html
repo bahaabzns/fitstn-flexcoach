@@ -201,21 +201,27 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>ID</th>
-                                <th>Started At</th>
-                                <th>Ended At</th>
-                                <th>Total Duration</th>
-                                <th>In-session</th>
-                                <th>Off-session work</th>
-                                <th>Idle</th>
-                                <th>Break</th>
-                                <th>Status</th>
+                                <th rowspan="2">ID</th>
+                                <th rowspan="2">Started At</th>
+                                <th rowspan="2">Ended At</th>
+                                <th rowspan="2">Total Shift Duration</th>
+                                <th colspan="3" style="text-align:center; background:#2d6a4f;">Active Shift</th>
+                                <th colspan="3" style="text-align:center; background:#922b21;">In-Active Shift</th>
+                                <th rowspan="2">Status</th>
+                            </tr>
+                            <tr>
+                                <th style="background:#40916c;">Total</th>
+                                <th style="background:#52b788; font-weight:normal; font-size:12px;">In-Session</th>
+                                <th style="background:#52b788; font-weight:normal; font-size:12px;">Off-Session</th>
+                                <th style="background:#c0392b;">Total</th>
+                                <th style="background:#e74c3c; font-weight:normal; font-size:12px;">On Break</th>
+                                <th style="background:#e74c3c; font-weight:normal; font-size:12px;">Idle</th>
                             </tr>
                         </thead>
                         <tbody>
                 `;
 
-                let sumDuration = 0, sumActive = 0, sumOffSession = 0, sumIdle = 0, sumBreak = 0;
+                let sumDuration = 0, sumActiveShift = 0, sumInactiveShift = 0, sumInSession = 0, sumOffSession = 0, sumBreak = 0, sumIdle = 0;
 
                 data.shifts.forEach(shift => {
                     const isActive = !shift.shift_ended_at;
@@ -230,11 +236,16 @@
                         ? shift.off_session_seconds
                         : Math.max(0, durationSeconds - activeSeconds - breakSeconds - idleSeconds);
 
+                    const activeShiftSec = activeSeconds + offSessionSeconds;
+                    const inactiveShiftSec = idleSeconds + breakSeconds;
+
                     sumDuration += durationSeconds;
-                    sumActive += activeSeconds;
+                    sumActiveShift += activeShiftSec;
+                    sumInactiveShift += inactiveShiftSec;
+                    sumInSession += activeSeconds;
+                    sumOffSession += offSessionSeconds;
                     sumBreak += breakSeconds;
                     sumIdle += idleSeconds;
-                    sumOffSession += offSessionSeconds;
 
                     tableHtml += `
                         <tr>
@@ -242,10 +253,12 @@
                             <td>${formatDateTime(shift.shift_started_at)}</td>
                             <td>${shift.shift_ended_at ? formatDateTime(shift.shift_ended_at) : '-'}</td>
                             <td>${formatDuration(durationSeconds)}</td>
-                            <td>${formatDuration(activeSeconds)}</td>
-                            <td>${offSessionSeconds > 0 ? formatDuration(offSessionSeconds) : '-'}</td>
-                            <td>${idleSeconds > 0 ? formatDuration(idleSeconds) : '-'}</td>
-                            <td>${breakSeconds > 0 ? formatDuration(breakSeconds) : '-'}</td>
+                            <td><strong>${activeShiftSec > 0 ? formatDuration(activeShiftSec) : '-'}</strong></td>
+                            <td style="color:#666;">${activeSeconds > 0 ? formatDuration(activeSeconds) : '-'}</td>
+                            <td style="color:#666;">${offSessionSeconds > 0 ? formatDuration(offSessionSeconds) : '-'}</td>
+                            <td><strong>${inactiveShiftSec > 0 ? formatDuration(inactiveShiftSec) : '-'}</strong></td>
+                            <td style="color:#666;">${breakSeconds > 0 ? formatDuration(breakSeconds) : '-'}</td>
+                            <td style="color:#666;">${idleSeconds > 0 ? formatDuration(idleSeconds) : '-'}</td>
                             <td>${statusBadge}</td>
                         </tr>
                     `;
@@ -257,10 +270,12 @@
                         <tr style="background:#f0f0f0; font-weight:bold;">
                             <td colspan="3" style="text-align:right;">Totals</td>
                             <td>${formatDuration(sumDuration)}</td>
-                            <td>${formatDuration(sumActive)}</td>
-                            <td>${formatDuration(sumOffSession)}</td>
-                            <td>${formatDuration(sumIdle)}</td>
-                            <td>${formatDuration(sumBreak)}</td>
+                            <td>${formatDuration(sumActiveShift)}</td>
+                            <td style="color:#666;">${formatDuration(sumInSession)}</td>
+                            <td style="color:#666;">${formatDuration(sumOffSession)}</td>
+                            <td>${formatDuration(sumInactiveShift)}</td>
+                            <td style="color:#666;">${formatDuration(sumBreak)}</td>
+                            <td style="color:#666;">${formatDuration(sumIdle)}</td>
                             <td></td>
                         </tr>
                     </tfoot>
