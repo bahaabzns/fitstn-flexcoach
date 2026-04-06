@@ -993,14 +993,12 @@ Every 10 sessions, summarize into a progress report.
 
 ## PART 7 — PROMPTS TO USE
 
-**Start any session:**
-> *"Read bob.instructions.md and run the Session Opening Routine."*
+**Start any session and Add a new feature:**:**
+*Read bob.instructions.md and run the Session Opening Routine. I want to add [feature]. Run the Feature Routine from bob.instructions.md.*
 
 **Start a new project:**
 > *"Run the New Project Routine from bob.instructions.md from Phase 1 Step 1. Do not write any feature code until the routine is fully complete."*
 
-**Add a new feature:**
-> *"I want to add [feature]. Run the Feature Routine from bob.instructions.md."*
 
 **Review code and End any session:**
 

@@ -103,3 +103,22 @@
 - Two different idle calculation approaches still need design decision (carried over)
 **Question I want to explore next:** Setting up a test suite (DEBT #2). Also the Boy Scout suggestion from this session: replace CORS Error objects with single-line console.warn to reduce console noise.
 **Confidence today (1–10):** 9
+
+## 2026-04-06 — Session 6 (Unify Shift Numbers)
+
+**What we built:** Unified shift time metrics across Agent Top Bar, Admin Shifts, Agent Shifts, and Agent Overview. Replaced event-based idle (always 0) with gap-based idle. Organized 5 metrics into a tree: Total Shift = Active Shift (In-Session + Off-Session) + In-Active Shift (On Break + Idle).
+**New concepts learned:**
+- Gap-based idle computation — measuring time between consecutive sessions and counting gaps exceeding a threshold as idle, instead of relying on idle start/resume events that only fire during active sessions
+- SQL CTEs (Common Table Expressions) for computing derived values in a single query — used `WITH ordered_sessions AS (...)` to compute inter-session gaps in shifts.js
+- Chart.js grouped stacking — using `stack: 'active'` and `stack: 'inactive'` to group related datasets into visual sub-stacks within a stacked bar chart
+- Colspan-based 2-row table headers — grouping sub-columns under parent headers (Active Shift → In-Session + Off-Session)
+- Extracting shared utility functions across server routes — `server/utils/shift-utils.js` with `computeGapIdle()` required by both `index.js` and `agent-overview.js`
+**Concepts I understood immediately:**
+- Time decomposition formula: Total = Active + Inactive, with each further broken into sub-components
+- Parenthetical sub-value display in the Chrome extension top bar (e.g., "Active: 2h30m (1h45m + 45m)")
+- Inline sub-breakdown cards with colored border-left for visual hierarchy in overview.html
+**Concepts I am still fuzzy on:**
+- Whether the N+1 query pattern (fetching sessions per-shift in a loop) will be a real bottleneck at scale (DEBT #14)
+- postgres.js SQL fragment interpolation edge cases (carried over)
+**Question I want to explore next:** Setting up a test suite (DEBT #2) — still the biggest gap. Also fixing the N+1 query pattern (DEBT #14) with a batch query approach.
+**Confidence today (1–10):** 9
