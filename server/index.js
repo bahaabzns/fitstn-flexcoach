@@ -118,10 +118,11 @@ const agentOverviewRoutes = require("./routes/agent-overview")(sql);
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
 const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin);
 
-// CORS: restrict to known clients (dev + production)
+// CORS: restrict to known clients (dev + production + FlexCoach host page for content scripts)
 const ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://fitstn-flexcoach.onrender.com",
+    "https://fitstn.flexcoach.app",
     "chrome-extension://",
 ];
 app.use(cors({
