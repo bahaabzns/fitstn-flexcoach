@@ -919,22 +919,47 @@ app.post("/api/chat-click", requireAgent, async (req, res) => {
             `;
         }
 
-        // Fetch which side (client or staff) last sent a message in this chat
-        const lastMessageFrom = await fetchLastMessageSide(chatName);
-
+        // Insert session immediately so status polls see it right away
+        // (last_message_from is backfilled asynchronously after the slow Supabase RPC)
         const result = await sql`
-            INSERT INTO sessions (chat_name, chat_preview, agent_id, is_client_initiated, last_message_from)
-            VALUES (${chatName || null}, ${chatPreview || null}, ${req.user.id}, ${lastMessageFrom === "client"}, ${lastMessageFrom})
+            INSERT INTO sessions (chat_name, chat_preview, agent_id)
+            VALUES (${chatName || null}, ${chatPreview || null}, ${req.user.id})
             RETURNING *
         `;
 
+        const sessionId = result[0].id;
+
         // Log session_started event
         await sql`
-            INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
-            VALUES (${req.user.id}, 'session_started', ${result[0].id}, ${JSON.stringify({ last_message_from: lastMessageFrom })}::jsonb)
+            INSERT INTO activity_events (agent_id, event_type, session_id)
+            VALUES (${req.user.id}, 'session_started', ${sessionId})
         `;
 
+        // Respond immediately — session exists for status polls
         res.json({ success: true, data: result[0] });
+
+        // Backfill last_message_from asynchronously (slow Supabase RPC)
+        fetchLastMessageSide(chatName).then(async (lastMessageFrom) => {
+            if (!lastMessageFrom) return;
+            try {
+                await sql`
+                    UPDATE sessions
+                    SET last_message_from = ${lastMessageFrom},
+                        is_client_initiated = ${lastMessageFrom === "client"}
+                    WHERE id = ${sessionId}
+                `;
+                // Update session_started event metadata with the result
+                await sql`
+                    UPDATE activity_events
+                    SET metadata = ${JSON.stringify({ last_message_from: lastMessageFrom })}::jsonb
+                    WHERE session_id = ${sessionId} AND event_type = 'session_started'
+                `;
+            } catch (err) {
+                console.warn("Backfill last_message_from failed for session", sessionId, err.message);
+            }
+        }).catch((err) => {
+            console.warn("fetchLastMessageSide failed for session", sessionId, err.message);
+        });
     } catch (err) {
         console.error("POST /api/chat-click error:", err.message);
         res.status(500).json({ error: "Failed to save chat click", details: err.message });
