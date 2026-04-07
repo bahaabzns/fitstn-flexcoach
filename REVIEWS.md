@@ -18,6 +18,7 @@
 | 2026-04-07 | Empty session detection across UI | 0 blockers, 0 warnings | Quick review PASS |
 | 2026-04-07 | Hot/Unread session counter — broaden CHATS_SELECTOR | 0 blockers, 0 warnings | Quick review PASS |
 | 2026-04-07 | Track last-message-side per session + display in UI | 0 blockers, 2 warnings (duplicate CSS DEBT #16, trailing whitespace false alarm) | PASS WITH WARNINGS — CSS tracked in existing DEBT #16 |
+| 2026-04-07 | Bug fix — session timer disappearing after 5s (race condition) | 0 blockers, 0 warnings, 1 suggestion (pre-existing console.log) | PASS — fire-and-forget backfill pattern clean |
 
 ---
 

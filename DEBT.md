@@ -29,3 +29,4 @@
 | 18 | LOW | Dead `loadMessages()` function and `msgCache` in dashboard.html — no onclick references them anymore | server/public/dashboard.html | 2026-04-07 | OPEN |
 | 18 | LOW | MAX_ROOMS_PER_FETCH=500 cap — if agent has >500 pending rooms, cutoff split and oldest-pending will be inaccurate | server/index.js | 2026-04-06 | OPEN |
 | 19 | LOW | Cutoff split counts timestamps from ALL rooms (handled+pending) then caps with Math.min — should filter rooms to pending-only (last_message_from=client) before splitting | server/index.js | 2026-04-06 | OPEN |
+| 20 | MEDIUM | Slow Supabase RPC (fetchLastMessageSide) was blocking session INSERT — caused session timer to disappear in production. Root cause: synchronous call ordering. Prevention: never put slow external calls between session creation and response | server/index.js | 2026-04-07 | ✅ RESOLVED 2026-04-07 — moved INSERT before Supabase RPC, backfill async |

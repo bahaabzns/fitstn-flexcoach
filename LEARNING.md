@@ -204,3 +204,20 @@
 - Performance impact of adding more correlated subqueries in the /api/overview endpoint (now 2 more per agent)
 **Question I want to explore next:** Setting up a test suite (DEBT #2) — 11 sessions in, still at 0% coverage.
 **Confidence today (1–10):** 9
+
+## 2026-04-07 — Session 12 (Bug Fix: Session Timer Disappearing)
+
+**What we built:** Fixed the session duration counter disappearing after 5 seconds in production. The root cause was a race condition: the slow Supabase RPC call (`fetchLastMessageSide`) blocked the session INSERT, causing status polls to see "no active session" during the 2-5s gap.
+**New concepts learned:**
+- Fire-and-forget with async backfill — respond to the client immediately, then enrich data asynchronously after `res.json()`. Critical for keeping latency low when non-essential metadata depends on slow external calls.
+- Race condition debugging by latency analysis — the bug only appeared in production (slow network to Supabase) but not in dev (fast local calls). Taught me to always consider "what if this takes 5 seconds?" for external calls.
+- `.then().catch()` pattern on a detached promise — running async work after the response without blocking the Express handler, with proper error isolation.
+**Concepts I understood immediately:**
+- The status poll mechanism (every 5s, checks `ended_at IS NULL`) and why the gap caused `between_sessions` to be returned
+- Why moving the INSERT before the RPC eliminates the race — the row exists before any slow call starts
+- Why `last_message_from` is safe to backfill — it's display metadata, not critical for session existence
+**Concepts I am still fuzzy on:**
+- postgres.js SQL fragment interpolation edge cases (carried over)
+- Whether Express guarantees no more middleware runs after `res.json()` — the fire-and-forget pattern assumes this
+**Question I want to explore next:** Setting up a test suite (DEBT #2) — 12 sessions in, still at 0% coverage.
+**Confidence today (1–10):** 9
