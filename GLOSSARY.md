@@ -22,3 +22,4 @@
 | **RTM** | Real-Time Monitoring — the core purpose of this system |
 | **Empty Session** | A session where the agent sent 0 messages — detected via `jsonb_array_length(messages) = 0` |
 | **FILTER clause** | PostgreSQL conditional aggregate: `COUNT(*) FILTER (WHERE condition)` — counts only rows matching the filter inside a GROUP BY |
+| **CSS class-contains selector** | `div.class1.class2` matches any element containing those classes (can have more). `[class='...']` requires the exact full class string. Use class-contains with Tailwind/utility-class frameworks where classes vary dynamically |

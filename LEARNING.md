@@ -172,3 +172,18 @@
 - Performance of `jsonb_array_length` in subqueries on large session tables
 **Question I want to explore next:** Setting up a test suite (DEBT #2). Also cleaning up the now-dead `loadMessages()` function in dashboard.html (DEBT #18).
 **Confidence today (1–10):** 9
+
+## 2026-04-07 — Session 10 (Hot/Unread Session Counter)
+
+**What we built:** Broadened the CHATS_SELECTOR in the chrome extension so session tracking works in FlexCoach's new Hot and Unread chat sections, not just the original All list.
+**New concepts learned:**
+- CSS exact-class selectors (`[class='...']`) vs class-contains selectors (`div.class1.class2`) — exact match fails when the platform adds/changes utility classes dynamically
+- DOM inspection workflow for third-party platform changes — comparing XPaths and class attributes across sections to isolate the mismatch
+**Concepts I understood immediately:**
+- The root cause: `div:last-child` in the old DOM path + exact class string match excluded Hot/Unread sections entirely
+- The fix: dropping the rigid path and using shared Tailwind classes that all chat items have in common
+**Concepts I am still fuzzy on:**
+- postgres.js SQL fragment interpolation edge cases (carried over)
+- How broad is "too broad" for a class-contains selector — risk of matching non-chat elements in future FlexCoach updates
+**Question I want to explore next:** Setting up a test suite (DEBT #2) — still the biggest gap. 10 sessions in, still at 0% coverage.
+**Confidence today (1–10):** 9
