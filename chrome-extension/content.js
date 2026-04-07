@@ -866,6 +866,8 @@ function attachClickHandlers() {
                 // Wait for the chat header to load, then extract name + code
                 setTimeout(() => {
                     const chatName = extractChatNameFromHeader() || "Unknown";
+                    const chatHeader = document.querySelector(".border-b.bg-background");
+                    const chatPreview = chatHeader?.querySelector("span.text-xs")?.innerText?.trim() || "";
 
                     fetch(API_URL, {
                         method: "POST",
@@ -873,7 +875,7 @@ function attachClickHandlers() {
                             "Content-Type": "application/json",
                             Authorization: "Bearer " + currentToken,
                         },
-                        body: JSON.stringify({ chatName, chatPreview: "" }),
+                        body: JSON.stringify({ chatName, chatPreview }),
                     })
                         .then((res) => res.json())
                         .then((data) => {

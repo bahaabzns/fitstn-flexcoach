@@ -14,6 +14,8 @@
         .empty { text-align: center; padding: 40px; color: #999; }
         .msg-badge { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
         .msg-badge:hover { background: #c7d2fe; }
+        .msg-badge.no-click { cursor: default; }
+        .msg-badge.no-click:hover { background: #e0e7ff; }
         .msg-badge.loading { background: #fef3c7; color: #92400e; cursor: wait; }
         .msg-badge.error { background: #fee2e2; color: #b91c1c; }
         .msg-list { display: none; margin-top: 6px; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
@@ -39,6 +41,8 @@
         .period-toggle button:last-child { border-radius: 0 4px 4px 0; }
         .period-toggle button.active { background: #333; color: #fff; border-color: #333; }
         .period-label { font-size: 13px; color: #777; margin-bottom: 12px; }
+        tr.empty-session { opacity: 0.55; }
+        .empty-tag { display: inline-block; background: #f3f4f6; color: #9ca3af; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600; margin-left: 4px; }
 
         .live-indicator {
             display: inline-block;
@@ -196,14 +200,15 @@
                         }
                         if (cached.open) listClass += ' open';
                     }
-                    return `<tr>
+                    const isEmpty = !row.message_count;
+                    return `<tr${isEmpty ? ' class="empty-session"' : ''}>
                         <td>${row.id}</td>
                         <td>${escapeHtml(row.agent_name || row.agent_email || "-")}</td>
                         <td>${escapeHtml(row.chat_preview || "-")}</td>
                         <td>${formatArabicDateTime(new Date(row.clicked_at))}</td>
                         <td>${row.duration_seconds != null ? formatDuration(row.duration_seconds) : formatDuration(Math.round((Date.now() - new Date(row.clicked_at).getTime()) / 1000))}</td>
                         <td>
-                            <span class="msg-badge" onclick="loadMessages(this, ${row.id})">${badgeText}</span>
+                            ${isEmpty ? '<span class="empty-tag">0 msgs</span>' : '<span class="msg-badge no-click">' + (row.message_count + ' msg' + (row.message_count !== 1 ? 's' : '')) + '</span>'}
                             <div class="${listClass}" id="msgs-${row.id}">${listHtml}</div>
                         </td>
                     </tr>`;

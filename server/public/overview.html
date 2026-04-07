@@ -513,7 +513,7 @@
                             </div>
                             ${detailsHtml}
                             ${shiftHtml}
-                            <div class="card-detail"><strong>Chats today:</strong> ${agent.today_sessions}</div>
+                            <div class="card-detail"><strong>Chats today:</strong> ${agent.today_sessions}${agent.today_empty_sessions > 0 ? ' <span style="color:#999;font-size:12px;">(' + agent.today_empty_sessions + ' empty)</span>' : ''}</div>
                         </div>
                     `;
                 }).join('');
@@ -690,7 +690,7 @@
             document.getElementById('performance-cards').innerHTML = `
                 <div class="summary-card">
                     <div class="label">Total Sessions</div>
-                    <div class="value">${perf.total_sessions}</div>
+                    <div class="value">${perf.total_sessions}${perf.total_empty_sessions > 0 ? ' <span style="color:#999;font-size:13px;">(' + perf.total_empty_sessions + ' empty)</span>' : ''}</div>
                 </div>
                 <div class="summary-card">
                     <div class="label">Total Shift Duration</div>

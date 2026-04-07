@@ -168,6 +168,7 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 (SELECT s.clicked_at FROM sessions s WHERE s.agent_id = a.id AND s.ended_at IS NULL ORDER BY s.clicked_at DESC LIMIT 1) AS current_chat_started_at,
                 (SELECT s.ended_at FROM sessions s WHERE s.agent_id = a.id AND s.ended_at IS NOT NULL ORDER BY s.ended_at DESC LIMIT 1) AS last_session_ended_at,
                 (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE) AS today_sessions,
+                (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE AND s.ended_at IS NOT NULL AND jsonb_array_length(COALESCE(s.messages, '[]'::jsonb)) = 0) AS today_empty_sessions,
                 (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
                     LEAST(COALESCE(s.ended_at, NOW()), COALESCE(sh2.shift_ended_at, NOW()))
                     - GREATEST(s.clicked_at, sh2.shift_started_at)
@@ -237,6 +238,7 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 current_chat_started_at: row.current_chat_started_at || null,
                 idle_since,
                 today_sessions: row.today_sessions,
+                today_empty_sessions: row.today_empty_sessions,
                 shift_idle_seconds,
                 shift_break_seconds: row.shift_break_seconds || 0,
             };
@@ -442,19 +444,24 @@ app.get("/api/sessions", requireAdmin, async (req, res) => {
         const { startDate, endDate } = getDateRange(period, dateParam);
 
         const result = await sql`
-            SELECT s.*, a.email as agent_email, a.name as agent_name
+            SELECT s.*, a.email as agent_email, a.name as agent_name,
+                jsonb_array_length(COALESCE(s.messages, '[]'::jsonb))::int as message_count
             FROM sessions s
             LEFT JOIN agents a ON s.agent_id = a.id
             WHERE s.clicked_at >= ${startDate}::date
             AND s.clicked_at < ${endDate}::date + INTERVAL '1 day'
             ORDER BY s.clicked_at DESC
         `;
-        const rows = result.map(row => ({
-            ...row,
-            duration_seconds: row.ended_at
-                ? Math.round((new Date(row.ended_at) - new Date(row.clicked_at)) / 1000)
-                : null,
-        }));
+        const rows = result.map(row => {
+            const { messages: _msgs, ...rest } = row;
+            return {
+                ...rest,
+                message_count: row.message_count || 0,
+                duration_seconds: row.ended_at
+                    ? Math.round((new Date(row.ended_at) - new Date(row.clicked_at)) / 1000)
+                    : null,
+            };
+        });
         res.json({ period: { type: period, start: startDate, end: endDate }, sessions: rows });
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch sessions", details: err.message });

@@ -94,6 +94,7 @@ module.exports = function (sql, getCachedSettings) {
                 SELECT
                     DATE(clicked_at) as session_date,
                     COUNT(*)::int as session_count,
+                    COUNT(*) FILTER (WHERE ended_at IS NOT NULL AND jsonb_array_length(COALESCE(messages, '[]'::jsonb)) = 0)::int as empty_session_count,
                     SUM(GREATEST(0, EXTRACT(EPOCH FROM (
                         LEAST(COALESCE(ended_at, NOW()), ${endDate}::date + INTERVAL '1 day')
                         - clicked_at
@@ -111,6 +112,7 @@ module.exports = function (sql, getCachedSettings) {
             const totalActiveInShift = shiftData.reduce((sum, r) => sum + (r.active_in_shift_seconds || 0), 0);
             const totalBreakSeconds = shiftData.reduce((sum, r) => sum + (r.break_seconds || 0), 0);
             const totalSessions = sessionData.reduce((sum, r) => sum + r.session_count, 0);
+            const totalEmptySessions = sessionData.reduce((sum, r) => sum + (r.empty_session_count || 0), 0);
             const totalActiveSeconds = sessionData.reduce((sum, r) => sum + (r.active_seconds || 0), 0);
             const totalMessages = sessionData.reduce((sum, r) => sum + (r.total_messages || 0), 0);
 
@@ -292,6 +294,7 @@ module.exports = function (sql, getCachedSettings) {
                 salary_history: salaryHistory.reverse(),
                 performance: {
                     total_sessions: totalSessions,
+                    total_empty_sessions: totalEmptySessions,
                     total_shift_seconds: totalShiftSeconds,
                     total_active_seconds: totalActiveSeconds,
                     total_break_seconds: totalBreakSeconds,

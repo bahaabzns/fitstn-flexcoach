@@ -155,3 +155,20 @@
 - postgres.js SQL fragment interpolation edge cases (carried over)
 **Question I want to explore next:** Filter rooms to pending-only before cutoff split (DEBT #19). Setting up a test suite (DEBT #2).
 **Confidence today (1–10):** 9
+
+## 2026-04-07 — Session 9 (Empty Session Detection)
+
+**What we built:** Differentiated empty sessions (0 agent messages) from non-empty sessions across the entire system — overview cards, agent detail performance, dashboard table, agent sessions table. Also fixed `chatPreview` not being sent from the chrome extension.
+**New concepts learned:**
+- PostgreSQL `FILTER` clause for conditional aggregates — `COUNT(*) FILTER (WHERE condition)` counts only matching rows within a GROUP BY, cleaner than CASE WHEN
+- Stripping unwanted columns from spread responses — `const { messages: _msgs, ...rest } = row` to exclude a field while keeping everything else
+- Falsy-check `!value` as safer comparison than `=== 0` when values may arrive as strings or null from postgres
+**Concepts I understood immediately:**
+- `jsonb_array_length(COALESCE(messages, '[]'::jsonb))` for counting JSON array entries — already used this pattern in agent-overview.js
+- CSS `opacity: 0.55` for visually de-emphasizing rows — simple and effective
+- Adding `ended_at IS NOT NULL` guard so active sessions aren't incorrectly counted as "empty"
+**Concepts I am still fuzzy on:**
+- postgres.js SQL fragment interpolation edge cases (carried over)
+- Performance of `jsonb_array_length` in subqueries on large session tables
+**Question I want to explore next:** Setting up a test suite (DEBT #2). Also cleaning up the now-dead `loadMessages()` function in dashboard.html (DEBT #18).
+**Confidence today (1–10):** 9

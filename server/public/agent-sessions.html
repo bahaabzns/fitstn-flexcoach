@@ -37,6 +37,8 @@
         .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: bold; }
         .badge-active { background: #d4edda; color: #155724; }
         .badge-ended { background: #e2e3e5; color: #383d41; }
+        tr.empty-session { opacity: 0.55; }
+        .empty-tag { display: inline-block; background: #f3f4f6; color: #9ca3af; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600; }
 
         .live-indicator {
             display: inline-block;
@@ -212,13 +214,14 @@
                 `;
 
                 data.sessions.forEach(session => {
+                    const isEmpty = !session.message_count;
                     tableHtml += `
-                        <tr>
+                        <tr${isEmpty ? ' class="empty-session"' : ''}>
                             <td>${session.id}</td>
                             <td>${escapeHtml(session.chat_preview || '-')}</td>
                             <td>${formatDateTime(session.clicked_at)}</td>
                             <td>${formatDuration(session.duration_seconds)}</td>
-                            <td>${session.message_count}</td>
+                            <td>${isEmpty ? '<span class="empty-tag">0 msgs</span>' : session.message_count + ' msgs'}</td>
                         </tr>
                     `;
                 });

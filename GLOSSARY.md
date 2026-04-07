@@ -20,3 +20,5 @@
 | **Supabase** | Backend-as-a-service used for FlexCoach platform data access |
 | **API_BASE** | The base server URL — toggled between localhost (dev) and render.com (production) in config.js |
 | **RTM** | Real-Time Monitoring — the core purpose of this system |
+| **Empty Session** | A session where the agent sent 0 messages — detected via `jsonb_array_length(messages) = 0` |
+| **FILTER clause** | PostgreSQL conditional aggregate: `COUNT(*) FILTER (WHERE condition)` — counts only rows matching the filter inside a GROUP BY |
