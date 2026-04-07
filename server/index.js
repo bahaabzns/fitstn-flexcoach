@@ -24,10 +24,11 @@ async function ensureSupabaseAuth() {
 }
 
 // Checks if a client's room is in the "waiting for agent" queue
-async function checkIfClientWaiting(chatName) {
+// Returns "client" or "staff" — whichever side sent the last message in this chat
+async function fetchLastMessageSide(chatName) {
     const clientCodeMatch = (chatName || "").match(/#(\S+)/);
     const clientCode = clientCodeMatch ? clientCodeMatch[1] : "";
-    if (!clientCode) return false;
+    if (!clientCode) return null;
 
     try {
         await ensureSupabaseAuth();
@@ -57,16 +58,16 @@ async function checkIfClientWaiting(chatName) {
         });
 
         if (error) {
-            console.warn("checkIfClientWaiting Supabase error:", error.message);
-            return false;
+            console.warn("fetchLastMessageSide Supabase error:", error.message);
+            return null;
         }
 
-        const isWaiting = (data?.total || 0) > 0;
-        console.log(`Client ${clientCode} waiting: ${isWaiting}`);
-        return isWaiting;
+        const side = (data?.total || 0) > 0 ? "client" : "staff";
+        console.log(`Client ${clientCode} last message from: ${side}`);
+        return side;
     } catch (err) {
-        console.warn("checkIfClientWaiting failed:", err.message);
-        return false;
+        console.warn("fetchLastMessageSide failed:", err.message);
+        return null;
     }
 }
 
@@ -169,6 +170,8 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 (SELECT s.ended_at FROM sessions s WHERE s.agent_id = a.id AND s.ended_at IS NOT NULL ORDER BY s.ended_at DESC LIMIT 1) AS last_session_ended_at,
                 (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE) AS today_sessions,
                 (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE AND s.ended_at IS NOT NULL AND jsonb_array_length(COALESCE(s.messages, '[]'::jsonb)) = 0) AS today_empty_sessions,
+                (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE AND s.last_message_from = 'client') AS today_client_sessions,
+                (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE AND s.last_message_from = 'staff') AS today_staff_sessions,
                 (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
                     LEAST(COALESCE(s.ended_at, NOW()), COALESCE(sh2.shift_ended_at, NOW()))
                     - GREATEST(s.clicked_at, sh2.shift_started_at)
@@ -916,19 +919,19 @@ app.post("/api/chat-click", requireAgent, async (req, res) => {
             `;
         }
 
-        // Check if client was waiting (= client-initiated session)
-        const isClientInitiated = await checkIfClientWaiting(chatName);
+        // Fetch which side (client or staff) last sent a message in this chat
+        const lastMessageFrom = await fetchLastMessageSide(chatName);
 
         const result = await sql`
-            INSERT INTO sessions (chat_name, chat_preview, agent_id, is_client_initiated)
-            VALUES (${chatName || null}, ${chatPreview || null}, ${req.user.id}, ${isClientInitiated})
+            INSERT INTO sessions (chat_name, chat_preview, agent_id, is_client_initiated, last_message_from)
+            VALUES (${chatName || null}, ${chatPreview || null}, ${req.user.id}, ${lastMessageFrom === "client"}, ${lastMessageFrom})
             RETURNING *
         `;
 
         // Log session_started event
         await sql`
             INSERT INTO activity_events (agent_id, event_type, session_id, metadata)
-            VALUES (${req.user.id}, 'session_started', ${result[0].id}, ${JSON.stringify({ is_client_initiated: isClientInitiated })}::jsonb)
+            VALUES (${req.user.id}, 'session_started', ${result[0].id}, ${JSON.stringify({ last_message_from: lastMessageFrom })}::jsonb)
         `;
 
         res.json({ success: true, data: result[0] });
@@ -1308,6 +1311,9 @@ app.listen(PORT, async () => {
 
         // Add messages column to sessions if it doesn't exist
         await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS messages JSONB DEFAULT '[]'`;
+
+        // Add last_message_from column — tracks which side (client/staff) sent the last message when session started
+        await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_message_from VARCHAR(10)`;
 
         // Add fitstn_id column to agents (links to Supabase staff UUID)
         await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS fitstn_id VARCHAR(100)`;

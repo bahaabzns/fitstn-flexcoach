@@ -95,6 +95,8 @@ module.exports = function (sql, getCachedSettings) {
                     DATE(clicked_at) as session_date,
                     COUNT(*)::int as session_count,
                     COUNT(*) FILTER (WHERE ended_at IS NOT NULL AND jsonb_array_length(COALESCE(messages, '[]'::jsonb)) = 0)::int as empty_session_count,
+                    COUNT(*) FILTER (WHERE last_message_from = 'client')::int as client_initiated_count,
+                    COUNT(*) FILTER (WHERE last_message_from = 'staff')::int as staff_initiated_count,
                     SUM(GREATEST(0, EXTRACT(EPOCH FROM (
                         LEAST(COALESCE(ended_at, NOW()), ${endDate}::date + INTERVAL '1 day')
                         - clicked_at
@@ -113,6 +115,8 @@ module.exports = function (sql, getCachedSettings) {
             const totalBreakSeconds = shiftData.reduce((sum, r) => sum + (r.break_seconds || 0), 0);
             const totalSessions = sessionData.reduce((sum, r) => sum + r.session_count, 0);
             const totalEmptySessions = sessionData.reduce((sum, r) => sum + (r.empty_session_count || 0), 0);
+            const totalClientSessions = sessionData.reduce((sum, r) => sum + (r.client_initiated_count || 0), 0);
+            const totalStaffSessions = sessionData.reduce((sum, r) => sum + (r.staff_initiated_count || 0), 0);
             const totalActiveSeconds = sessionData.reduce((sum, r) => sum + (r.active_seconds || 0), 0);
             const totalMessages = sessionData.reduce((sum, r) => sum + (r.total_messages || 0), 0);
 
@@ -295,6 +299,8 @@ module.exports = function (sql, getCachedSettings) {
                 performance: {
                     total_sessions: totalSessions,
                     total_empty_sessions: totalEmptySessions,
+                    client_sessions: totalClientSessions,
+                    staff_sessions: totalStaffSessions,
                     total_shift_seconds: totalShiftSeconds,
                     total_active_seconds: totalActiveSeconds,
                     total_break_seconds: totalBreakSeconds,
@@ -331,6 +337,7 @@ module.exports = function (sql, getCachedSettings) {
             const sessions = await sql`
                 SELECT
                     s.id, s.chat_name, s.chat_preview, s.clicked_at, s.ended_at,
+                    s.last_message_from,
                     CASE WHEN s.ended_at IS NOT NULL THEN
                         EXTRACT(EPOCH FROM (s.ended_at - s.clicked_at))::int
                     ELSE NULL END as duration_seconds,

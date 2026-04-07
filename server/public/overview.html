@@ -514,6 +514,11 @@
                             ${detailsHtml}
                             ${shiftHtml}
                             <div class="card-detail"><strong>Chats today:</strong> ${agent.today_sessions}${agent.today_empty_sessions > 0 ? ' <span style="color:#999;font-size:12px;">(' + agent.today_empty_sessions + ' empty)</span>' : ''}</div>
+                            <div class="card-detail" style="font-size:12px; color:#666;">
+                                <span style="color:#856404;">Client: <strong>${agent.today_client_sessions || 0}</strong></span>
+                                &nbsp;
+                                <span style="color:#155724;">Staff: <strong>${agent.today_staff_sessions || 0}</strong></span>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -691,6 +696,10 @@
                 <div class="summary-card">
                     <div class="label">Total Sessions</div>
                     <div class="value">${perf.total_sessions}${perf.total_empty_sessions > 0 ? ' <span style="color:#999;font-size:13px;">(' + perf.total_empty_sessions + ' empty)</span>' : ''}</div>
+                    <div style="margin-top:6px; font-size:12px; color:#666; display:flex; gap:12px;">
+                        <span>Client: <strong style="color:#856404;">${perf.client_sessions}</strong></span>
+                        <span>Staff: <strong style="color:#155724;">${perf.staff_sessions}</strong></span>
+                    </div>
                 </div>
                 <div class="summary-card">
                     <div class="label">Total Shift Duration</div>

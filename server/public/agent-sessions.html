@@ -39,6 +39,9 @@
         .badge-ended { background: #e2e3e5; color: #383d41; }
         tr.empty-session { opacity: 0.55; }
         .empty-tag { display: inline-block; background: #f3f4f6; color: #9ca3af; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600; }
+        .side-tag { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; }
+        .side-client { background: #fff3cd; color: #856404; }
+        .side-staff { background: #d4edda; color: #155724; }
 
         .live-indicator {
             display: inline-block;
@@ -205,6 +208,7 @@
                             <tr>
                                 <th>ID</th>
                                 <th>Code</th>
+                                <th>Last Msg</th>
                                 <th>Clicked At</th>
                                 <th>Duration</th>
                                 <th>Messages</th>
@@ -215,10 +219,16 @@
 
                 data.sessions.forEach(session => {
                     const isEmpty = !session.message_count;
+                    const sideLabel = session.last_message_from === 'client'
+                        ? '<span class="side-tag side-client">Client</span>'
+                        : session.last_message_from === 'staff'
+                        ? '<span class="side-tag side-staff">Staff</span>'
+                        : '-';
                     tableHtml += `
                         <tr${isEmpty ? ' class="empty-session"' : ''}>
                             <td>${session.id}</td>
                             <td>${escapeHtml(session.chat_preview || '-')}</td>
+                            <td>${sideLabel}</td>
                             <td>${formatDateTime(session.clicked_at)}</td>
                             <td>${formatDuration(session.duration_seconds)}</td>
                             <td>${isEmpty ? '<span class="empty-tag">0 msgs</span>' : session.message_count + ' msgs'}</td>
