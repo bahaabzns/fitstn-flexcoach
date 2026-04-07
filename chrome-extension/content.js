@@ -1,5 +1,6 @@
+// Matches chat items across all sections (All, Hot, Unread) — uses shared Tailwind classes
 const CHATS_SELECTOR =
-  "html body div main div div:first-child div div:last-child div div div div[class='flex items-start gap-3 p-3 cursor-pointer transition-colors hover:bg-muted/50']";
+  "div.flex.items-start.gap-3.p-3.cursor-pointer.transition-colors";
 
 const API_URL = API_BASE + "/api/chat-click";
 
