@@ -187,3 +187,20 @@
 - How broad is "too broad" for a class-contains selector — risk of matching non-chat elements in future FlexCoach updates
 **Question I want to explore next:** Setting up a test suite (DEBT #2) — still the biggest gap. 10 sessions in, still at 0% coverage.
 **Confidence today (1–10):** 9
+
+## 2026-04-07 — Session 11 (Last Message Side)
+
+**What we built:** Track which side (client or staff) last sent a message when a session starts. Renamed `checkIfClientWaiting()` → `fetchLastMessageSide()`, added `last_message_from` column to sessions table, displayed in admin dashboard, agent sessions, live overview cards, and performance cards.
+**New concepts learned:**
+- Evolving a boolean column (`is_client_initiated`) into a richer string column (`last_message_from`) while maintaining backward compatibility — both columns coexist
+- Reusing existing Supabase RPC call pattern with different return type interpretation — same query, different data extraction
+- FILTER clause for multiple conditional counts in a single GROUP BY query — `client_initiated_count` and `staff_initiated_count` alongside existing `empty_session_count`
+**Concepts I understood immediately:**
+- Adding new columns via `ALTER TABLE ADD COLUMN IF NOT EXISTS` — safe, additive migration
+- Displaying conditional badges in HTML using ternary chains for "client"/"staff"/null
+- Propagating new data through the full stack: SQL query → JS aggregation → API response → HTML rendering
+**Concepts I am still fuzzy on:**
+- postgres.js SQL fragment interpolation edge cases (carried over)
+- Performance impact of adding more correlated subqueries in the /api/overview endpoint (now 2 more per agent)
+**Question I want to explore next:** Setting up a test suite (DEBT #2) — 11 sessions in, still at 0% coverage.
+**Confidence today (1–10):** 9
