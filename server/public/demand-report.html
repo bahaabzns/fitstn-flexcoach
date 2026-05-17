@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Demand Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; padding: 32px; color: #1a1a1a; }
+
+  /* Page header / nav */
+  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .page-header h1 { font-size: 22px; font-weight: 600; }
+  .page-header nav a { margin-right: 16px; text-decoration: none; color: #555; font-weight: 500; font-size: 14px; }
+  .page-header nav a.active { color: #1a1a1a; font-weight: bold; border-bottom: 2px solid #1a1a1a; padding-bottom: 2px; }
+  .logout-btn { padding: 7px 14px; background: #dc3545; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-left: 12px; }
+  .logout-btn:hover { background: #b02a37; }
+
+  /* Controls */
+  .controls {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: #fff; border-radius: 8px; padding: 16px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08); max-width: 900px; margin-bottom: 6px;
+  }
+  .controls label { font-size: 13px; color: #555; white-space: nowrap; }
+  .controls input[type="datetime-local"], .controls select {
+    border: 1px solid #ddd; border-radius: 6px; padding: 7px 10px; font-size: 14px; color: #1a1a1a;
+  }
+  .controls input[type="datetime-local"] { min-width: 175px; }
+  .controls input[type="datetime-local"]:focus, .controls select:focus { outline: none; border-color: #555; }
+  .range-arrow { color: #aaa; font-size: 18px; }
+  .range-note { font-size: 12px; color: #aaa; max-width: 900px; margin-bottom: 16px; padding-left: 4px; }
+  button {
+    background: #1a1a1a; color: #fff; border: none; border-radius: 6px;
+    padding: 8px 18px; font-size: 14px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: #333; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  button.secondary { background: #fff; color: #1a1a1a; border: 1px solid #ccc; }
+  button.secondary:hover { background: #f5f5f5; }
+  button.success { background: #1e7e34; }
+  button.success:hover { background: #155724; }
+
+  /* Alerts */
+  .alert { max-width: 780px; border-radius: 8px; padding: 14px 16px; font-size: 14px; margin-bottom: 16px; }
+  .alert.loading { background: #f0f7ff; border: 1px solid #cce0ff; color: #1a5fa8; }
+  .alert.error   { background: #fff3f3; border: 1px solid #f5c6c6; color: #c0392b; }
+  .alert.empty   { background: #fffbe6; border: 1px solid #ffe066; color: #7a6000; }
+  .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor;
+             border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite;
+             vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Cache panel */
+  .cache-panel {
+    max-width: 780px; background: #fff; border: 1px solid #cce0ff; border-radius: 8px;
+    padding: 16px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 20px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .cache-panel .icon { font-size: 22px; }
+  .cache-panel .info { flex: 1; }
+  .cache-panel strong { font-size: 14px; display: block; margin-bottom: 2px; }
+  .cache-panel .meta { font-size: 12px; color: #666; }
+  .cache-panel .actions { display: flex; gap: 10px; }
+
+  /* Save bar */
+  .save-bar {
+    max-width: 780px; background: #f0f7ff; border: 1px solid #cce0ff; border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px;
+  }
+  .save-bar span { font-size: 13px; color: #1a5fa8; flex: 1; }
+
+  /* Stats row */
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; max-width: 780px; margin-bottom: 24px; }
+  .stat-card {
+    background: #fff; border-radius: 8px; padding: 14px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08); flex: 1; min-width: 130px;
+  }
+  .stat-card .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+  .stat-card .value { font-size: 24px; font-weight: 600; }
+  .stat-card .value.peak { color: #e85d04; }
+  .source-badge {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px;
+    border-radius: 10px; vertical-align: middle; margin-left: 6px;
+  }
+  .source-badge.live   { background: #e6f4ea; color: #1e7e34; }
+  .source-badge.cached { background: #e8f0fe; color: #1a5fa8; }
+
+  /* Two-column grid */
+  .content-grid {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 20px;
+    max-width: 1100px;
+  }
+  @media (max-width: 900px) {
+    .content-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Demand table */
+  .section-title { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; background: #fff;
+          border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  thead { background: #1a1a1a; color: #fff; }
+  thead th { padding: 11px 14px; text-align: left; font-size: 12px; font-weight: 500; }
+  thead th.num { text-align: right; }
+  tbody tr:nth-child(even) { background: #fafafa; }
+  tbody tr:hover { background: #f0f7ff; }
+  tbody td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #eee; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot tr { background: #f0f0f0; font-weight: 600; }
+  tfoot td { padding: 10px 14px; font-size: 13px; border-top: 2px solid #ddd; }
+
+  /* Chart */
+  .chart-wrap { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+
+  .note { margin-top: 14px; font-size: 12px; color: #888; }
+
+  /* Mode toggle */
+  .mode-toggle { display: flex; gap: 8px; margin-bottom: 20px; }
+  .mode-btn {
+    background: #fff; color: #555; border: 1px solid #ddd; border-radius: 6px;
+    padding: 7px 20px; font-size: 14px; cursor: pointer;
+  }
+  .mode-btn:hover { background: #f5f5f5; color: #1a1a1a; }
+  .mode-btn.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+  /* Multi-day */
+  .multi-section { margin-bottom: 24px; max-width: 1100px; }
+  .progress-bar-wrap { max-width: 780px; background: #e0e0e0; border-radius: 4px; height: 6px; margin-top: 8px; overflow: hidden; }
+  .progress-bar { background: #1a1a1a; height: 100%; border-radius: 4px; transition: width .3s; }
+
+  /* Package filter bar */
+  .pkg-filter-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: #fff; border-radius: 8px; padding: 10px 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06); max-width: 900px; margin-bottom: 6px; font-size: 13px;
+  }
+  .pkg-filter-label { color: #555; font-weight: 600; white-space: nowrap; }
+  .pkg-cb-label { display: flex; align-items: center; gap: 4px; cursor: pointer; color: #333; white-space: nowrap; }
+  .pkg-cb-label input { cursor: pointer; }
+  .pkg-toggle-link { font-size: 12px; color: #555; text-decoration: none; }
+  .pkg-toggle-link:hover { text-decoration: underline; }
+
+  /* Day checkboxes & combine */
+  .day-cb { cursor: pointer; width: 14px; height: 14px; }
+  tr.combine-checked { background: #eef4ff !important; }
+  .ungroup-btn { background: none; border: none; cursor: pointer; color: #aaa; font-size: 14px; padding: 0; line-height: 1; }
+  .ungroup-btn:hover { color: #c0392b; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Demand Report</h1>
+  <div>
+    <nav style="display:inline">
+      <a href="/overview.html">Overview</a>
+      <a href="/dashboard.html">Sessions</a>
+      <a href="/agents.html">Agents</a>
+      <a href="/shifts.html">Shifts</a>
+      <a href="/activity-log.html">Activity Log</a>
+      <a href="/salaries.html">Salaries</a>
+      <a href="/staff-assignator.html">Assignator</a>
+      <a href="/demand-report.html" class="active">Demand Report</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<div class="mode-toggle">
+  <button id="modeBtn-single" class="mode-btn active" onclick="setMode('single')">Single Day</button>
+  <button id="modeBtn-multi"  class="mode-btn"        onclick="setMode('multi')">Multi-Day Range</button>
+</div>
+
+<div id="singleMode">
+<div class="controls">
+  <label>From</label>
+  <input type="datetime-local" id="fromPicker" onchange="resetPage()">
+  <span class="range-arrow">→</span>
+  <label>To</label>
+  <input type="datetime-local" id="toPicker" onchange="resetPage()">
+  <button id="fetchBtn" onclick="onFetch()">Fetch</button>
+</div>
+<p class="range-note">Times are in Egypt/Cairo (UTC+2) · Maximum range: 24 hours</p>
+
+<div id="alertArea"></div>
+<div id="cachePanel" style="display:none"></div>
+<div id="saveBar" style="display:none"></div>
+
+<div id="result" style="display:none">
+  <div class="stats" id="statsRow"></div>
+  <div class="content-grid">
+    <div>
+      <div class="section-title">Demand by Package</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Package</th>
+            <th class="num">Client First Sent</th>
+            <th class="num">Coach Reached Out</th>
+            <th class="num">Client Replied</th>
+            <th class="num">Reply Rate</th>
+            <th class="num">Total Demand</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+        <tfoot id="tableFoot"></tfoot>
+      </table>
+      <p class="note">Total Demand = Client First Sent + Client Replied after coach reach-out.</p>
+    </div>
+    <div>
+      <div class="section-title">Demand Rooms by Hour</div>
+      <div class="chart-wrap">
+        <canvas id="chart" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px; max-width:1100px;" id="slaSection">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+      <div class="section-title" style="margin:0">SLA Achievement by Package</div>
+      <button class="secondary" id="slaBtn" onclick="fetchSLA()" style="padding:5px 14px;font-size:12px">Calculate SLA</button>
+    </div>
+    <div id="slaAlertArea"></div>
+    <div id="slaResult" style="display:none">
+      <table>
+        <thead>
+          <tr>
+            <th>Package</th>
+            <th>SLA Target</th>
+            <th>Business Window</th>
+            <th class="num">In Window</th>
+            <th class="num">Within SLA</th>
+            <th class="num">Breached</th>
+            <th class="num">No Reply</th>
+            <th class="num">Breach Rate</th>
+            <th class="num">SLA Rate</th>
+          </tr>
+        </thead>
+        <tbody id="slaTableBody"></tbody>
+      </table>
+      <p class="note">Only client messages sent during business hours count toward SLA. Fit Express: % of rooms with ≥1 staff reply in period. Reply window extends 24h beyond range end to capture delayed replies.</p>
+      <div style="margin-top:20px">
+        <div class="section-title">SLA Achievement by Agent</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th class="num">In Window</th>
+              <th class="num">Within SLA</th>
+              <th class="num">Breached</th>
+              <th class="num">No Reply</th>
+              <th class="num">Breach Rate</th>
+              <th class="num">SLA Rate</th>
+            </tr>
+          </thead>
+          <tbody id="slaCoachBody"></tbody>
+        </table>
+        <p class="note">Fit Express rooms counted as 1 unit each (replied = within SLA, no reply = breach).</p>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px; max-width:1100px;">
+    <div class="section-title">Demand by Coach</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Coach</th>
+          <th class="num">Client First Sent</th>
+          <th class="num">Coach Reached Out</th>
+          <th class="num">Client Replied</th>
+          <th class="num">Reply Rate</th>
+          <th class="num">Total Demand</th>
+          <th class="num">Utilization</th>
+          <th class="num">Avg Client Msgs</th>
+          <th class="num">Avg Coach Msgs</th>
+        </tr>
+      </thead>
+      <tbody id="coachTableBody"></tbody>
+      <tfoot id="coachTableFoot"></tfoot>
+    </table>
+  </div>
+</div>
+</div><!-- #singleMode -->
+
+<!-- ── Multi-Day Mode ─────────────────────────────────── -->
+<div id="multiMode" style="display:none">
+
+  <div class="controls">
+    <label>Start</label>
+    <input type="date" id="multiStart">
+    <span class="range-arrow">→</span>
+    <label>End</label>
+    <input type="date" id="multiEnd">
+    <label>Window</label>
+    <input type="time" id="multiFromTime" value="18:01" style="width:110px">
+    <span class="range-arrow">→</span>
+    <input type="time" id="multiToTime" value="18:00" style="width:110px">
+    <span style="font-size:12px;color:#aaa;white-space:nowrap">(next day)</span>
+    <button id="multiFetchBtn" onclick="onMultiFetch()">Fetch All</button>
+  </div>
+
+  <div class="pkg-filter-bar">
+    <span class="pkg-filter-label">Packages:</span>
+    <label class="pkg-cb-label"><input type="checkbox" class="pkg-cb" value="Fit Solo"     checked onchange="if(multiGroups.length)refreshDisplay()"> Fit Solo</label>
+    <label class="pkg-cb-label"><input type="checkbox" class="pkg-cb" value="Fit Solo Pro" checked onchange="if(multiGroups.length)refreshDisplay()"> Fit Solo Pro</label>
+    <label class="pkg-cb-label"><input type="checkbox" class="pkg-cb" value="Fit Express"  checked onchange="if(multiGroups.length)refreshDisplay()"> Fit Express</label>
+    <label class="pkg-cb-label"><input type="checkbox" class="pkg-cb" value="Fit Duo"      checked onchange="if(multiGroups.length)refreshDisplay()"> Fit Duo</label>
+    <label class="pkg-cb-label"><input type="checkbox" class="pkg-cb" value="Fit Fam"      checked onchange="if(multiGroups.length)refreshDisplay()"> Fit Fam</label>
+    <a href="#" class="pkg-toggle-link" onclick="toggleAllPkgs(true);return false">All</a>
+    <span style="color:#ddd">/</span>
+    <a href="#" class="pkg-toggle-link" onclick="toggleAllPkgs(false);return false">None</a>
+    <span style="font-size:11px;color:#bbb;margin-left:2px">— filters daily table &amp; summary; chart and coach table show all packages</span>
+  </div>
+
+  <p class="range-note">Each "day" spans from the From-time to the To-time the next calendar day · Egypt/Cairo (UTC+2)</p>
+
+  <div id="multiAlertArea"></div>
+
+  <div id="multiSaveBar" style="display:none" class="save-bar">
+    <span id="multiSaveMsg"></span>
+    <button id="multiSaveBtn" onclick="saveAllToCache()" style="display:none">Save to Cache</button>
+    <button class="secondary" onclick="onMultiFetch(true)">Re-fetch All from Supabase</button>
+  </div>
+
+  <div id="multiResult" style="display:none">
+
+    <div class="stats multi-section" id="multiSummaryRow"></div>
+
+    <div class="multi-section">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+        <div class="section-title" style="margin:0">Daily Breakdown</div>
+        <button class="secondary" id="combineBtn"    onclick="combineSelected()"  style="display:none;padding:5px 12px;font-size:12px">Combine Selected</button>
+        <button class="secondary" id="resetGroupsBtn" onclick="resetGroups()"     style="display:none;padding:5px 12px;font-size:12px">Reset Groups</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:28px"></th>
+            <th>Day</th>
+            <th class="num">Active</th>
+            <th class="num">Client First Sent</th>
+            <th class="num">Coach Reached Out</th>
+            <th class="num">Client Replied</th>
+            <th class="num">Reply Rate</th>
+            <th class="num">Total Demand</th>
+            <th class="num">Demand %</th>
+            <th class="num">Avg Client Msgs</th>
+            <th class="num">Avg Coach Msgs</th>
+          </tr>
+        </thead>
+        <tbody id="multiDailyBody"></tbody>
+        <tfoot id="multiDailyFoot"></tfoot>
+      </table>
+    </div>
+
+    <div class="multi-section">
+      <div class="section-title">Demand by Day</div>
+      <div class="chart-wrap">
+        <canvas id="multiChart" height="80"></canvas>
+      </div>
+    </div>
+
+    <div class="multi-section">
+      <div class="section-title">Coach Performance (All Days · All Packages)</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Coach</th>
+            <th class="num">Client First Sent</th>
+            <th class="num">Coach Reached Out</th>
+            <th class="num">Client Replied</th>
+            <th class="num">Reply Rate</th>
+            <th class="num">Total Demand</th>
+            <th class="num">Avg / Day</th>
+            <th class="num">Utilization</th>
+            <th class="num">Avg Client Msgs</th>
+            <th class="num">Avg Coach Msgs</th>
+          </tr>
+        </thead>
+        <tbody id="multiCoachBody"></tbody>
+        <tfoot id="multiCoachFoot"></tfoot>
+      </table>
+    </div>
+
+    <div class="multi-section" id="multiSlaSection">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+        <div class="section-title" style="margin:0">SLA Achievement by Package</div>
+        <button class="secondary" id="multiSlaBtn" onclick="fetchMultiSLA()" style="padding:5px 14px;font-size:12px">Calculate SLA</button>
+      </div>
+      <div id="multiSlaAlertArea"></div>
+      <div id="multiSlaResult" style="display:none">
+        <table>
+          <thead>
+            <tr>
+              <th>Package</th>
+              <th>SLA Target</th>
+              <th>Business Window</th>
+              <th class="num">In Window</th>
+              <th class="num">Within SLA</th>
+              <th class="num">Breached</th>
+              <th class="num">No Reply</th>
+              <th class="num">Breach Rate</th>
+              <th class="num">SLA Rate</th>
+            </tr>
+          </thead>
+          <tbody id="multiSlaTableBody"></tbody>
+        </table>
+        <p class="note">Only client messages sent during business hours count toward SLA. Fit Express: % of rooms with ≥1 staff reply in period.</p>
+        <div style="margin-top:20px">
+          <div class="section-title">SLA Achievement by Agent</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th class="num">In Window</th>
+                <th class="num">Within SLA</th>
+                <th class="num">Breached</th>
+                <th class="num">No Reply</th>
+                <th class="num">Breach Rate</th>
+                <th class="num">SLA Rate</th>
+              </tr>
+            </thead>
+            <tbody id="multiSlaCoachBody"></tbody>
+          </table>
+          <p class="note">Fit Express rooms counted as 1 unit each (replied = within SLA, no reply = breach).</p>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- #multiResult -->
+</div><!-- #multiMode -->
+
+<script>
+  // ── Auth ──────────────────────────────────────────────────
+  const token = localStorage.getItem('adminToken');
+  if (!token) { window.location.href = '/'; }
+
+  function authFetch(url, options = {}) {
+    options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+    return fetch(url, options).then(res => {
+      if (res.status === 401) { localStorage.removeItem('adminToken'); window.location.href = '/'; }
+      return res;
+    });
+  }
+
+  function logout() {
+    authFetch('/api/admin/logout', { method: 'POST' });
+    localStorage.removeItem('adminToken');
+    window.location.href = '/';
+  }
+
+  const UTC_OFFSET = 2; // Egypt/Cairo UTC+2
+  const CAPACITY_PER_SHIFT = Math.floor((8 * 60 - 60) / 2.5); // 168 rooms/agent @ 2.5 min/room, 8h shift − 60min buffer
+
+  // ── init default range: yesterday 00:00 → 23:59 ──────────
+  (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const ymd = d.toISOString().slice(0, 10);
+    document.getElementById('fromPicker').value = `${ymd}T00:00`;
+    document.getElementById('toPicker').value   = `${ymd}T23:59`;
+  })();
+
+  let chartInstance = null;
+  let pendingCache  = null;
+
+  // ── UTC conversion ────────────────────────────────────────
+  function toUTC(localDT) {
+    const [datePart, timePart] = localDT.split('T');
+    const [y, mo, d] = datePart.split('-').map(Number);
+    const [h, mi]    = (timePart || '00:00').split(':').map(Number);
+    return new Date(Date.UTC(y, mo - 1, d, h, mi) - UTC_OFFSET * 3600000).toISOString();
+  }
+
+  function fmtLocal(isoUTC) {
+    const ms = new Date(isoUTC).getTime() + UTC_OFFSET * 3600000;
+    return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+  }
+
+  function replyRate(replied, initiated) {
+    if (!initiated) return '—';
+    return ((replied / initiated) * 100).toFixed(1) + '%';
+  }
+
+  function resetPage() {
+    pendingCache = null;
+    document.getElementById('cachePanel').style.display = 'none';
+    document.getElementById('saveBar').style.display = 'none';
+    document.getElementById('result').style.display = 'none';
+    document.getElementById('alertArea').innerHTML = '';
+    document.getElementById('slaResult').style.display = 'none';
+    document.getElementById('slaAlertArea').innerHTML = '';
+    document.getElementById('slaBtn').innerHTML = 'Calculate SLA';
+    document.getElementById('slaBtn').disabled = false;
+  }
+
+  // ── entry point ──────────────────────────────────────────
+  async function onFetch() {
+    const fromVal = document.getElementById('fromPicker').value;
+    const toVal   = document.getElementById('toPicker').value;
+    if (!fromVal || !toVal) { showAlert('error', 'Please select both From and To times.'); return; }
+
+    const fromUTC = toUTC(fromVal);
+    const toUTC_  = toUTC(toVal);
+
+    if (new Date(toUTC_) <= new Date(fromUTC)) {
+      showAlert('error', '"To" must be after "From".'); return;
+    }
+    if (new Date(toUTC_) - new Date(fromUTC) > 24 * 3600 * 1000) {
+      showAlert('error', 'Maximum range is 24 hours.'); return;
+    }
+
+    resetPage();
+    setFetchBtn(true);
+    showAlert('loading', `Checking database for ${fmtLocal(fromUTC)} → ${fmtLocal(toUTC_)}…`);
+    try {
+      const cacheRes = await authFetch(`/api/daily-stats-cache?from=${encodeURIComponent(fromUTC)}&to=${encodeURIComponent(toUTC_)}`);
+      const cache = await cacheRes.json();
+      clearAlert();
+      if (cache.exists) {
+        pendingCache = cache;
+        showCachePanel(cache);
+      } else {
+        await fetchFromSupabase(fromUTC, toUTC_, false);
+      }
+    } catch (err) {
+      showAlert('error', `Failed: ${err.message}`);
+    } finally {
+      setFetchBtn(false);
+    }
+  }
+
+  // ── use cached ────────────────────────────────────────────
+  function useCached() {
+    if (!pendingCache) return;
+    const savedAt = pendingCache.savedAt;
+    hideCachePanel();
+    renderAll(pendingCache, 'cached');
+    const bar = document.getElementById('saveBar');
+    bar.innerHTML = `
+      <span>Cached · Saved ${new Date(savedAt).toLocaleString()}</span>
+      <button class="secondary" onclick="fetchFresh()">Re-fetch from Supabase</button>`;
+    bar.style.display = 'flex';
+  }
+
+  // ── fetch fresh ───────────────────────────────────────────
+  async function fetchFresh() {
+    const fromVal = document.getElementById('fromPicker').value;
+    const toVal   = document.getElementById('toPicker').value;
+    hideCachePanel();
+    await fetchFromSupabase(toUTC(fromVal), toUTC(toVal), true);
+  }
+
+  // ── supabase fetch ────────────────────────────────────────
+  async function fetchFromSupabase(fromUTC, toUTC_, isOverride) {
+    setFetchBtn(true);
+    showAlert('loading', `<span class="spinner"></span>Fetching from Supabase for ${fmtLocal(fromUTC)} → ${fmtLocal(toUTC_)}… this may take a moment.`);
+    try {
+      const res = await authFetch(`/api/daily-stats?from=${encodeURIComponent(fromUTC)}&to=${encodeURIComponent(toUTC_)}`);
+      const data = await res.json();
+      clearAlert();
+      if (!res.ok) { showAlert('error', data.error || 'Unknown error'); return; }
+      if (!data.total_active_rooms) { showAlert('empty', `No active rooms found for this range.`); return; }
+      renderAll(data, 'live');
+      showSaveBar(data, isOverride);
+    } catch (err) {
+      showAlert('error', `Failed: ${err.message}`);
+    } finally {
+      setFetchBtn(false);
+    }
+  }
+
+  // ── save to DB ────────────────────────────────────────────
+  async function saveToDatabase(data, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const res = await authFetch('/api/daily-stats-cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (result.saved) {
+        btn.textContent = '✓ Saved';
+        btn.className = 'success';
+        setTimeout(() => { document.getElementById('saveBar').style.display = 'none'; }, 2500);
+      } else {
+        btn.textContent = 'Save failed'; btn.disabled = false;
+      }
+    } catch {
+      btn.textContent = 'Save failed'; btn.disabled = false;
+    }
+  }
+
+  // ── render ────────────────────────────────────────────────
+  function renderAll(data, source) {
+    const rangeLabel    = `${fmtLocal(data.from)} → ${fmtLocal(data.to)}`;
+    const demandRows    = data.demand_rows  || [];
+    const coachRows     = data.coach_rows   || [];
+    const phFirst       = data.peak_hours_client_first   || Array(24).fill(0);
+    const phReplied     = data.peak_hours_client_replied || Array(24).fill(0);
+    const totalActive   = data.total_active_rooms    || 0;
+    const coachInit     = data.total_coach_initiated || 0;
+    const clientReplied = data.total_client_replied  || 0;
+    const clientFirst   = data.total_demand_rooms    || 0;
+    const totalDemand   = clientFirst + clientReplied;
+    const demandPct     = totalActive > 0 ? ((totalDemand / totalActive) * 100).toFixed(1) : '0.0';
+    const clientMsgs    = data.client_messages || 0;
+    const coachMsgs     = data.coach_messages  || 0;
+    const avgClientMsgs = totalActive > 0 ? (clientMsgs / totalActive).toFixed(1) : '—';
+    const avgCoachMsgs  = totalActive > 0 ? (coachMsgs  / totalActive).toFixed(1) : '—';
+
+    const agentsNeeded = totalDemand > 0 ? Math.ceil(totalDemand / CAPACITY_PER_SHIFT) : 0;
+    const maxCapacity  = agentsNeeded * CAPACITY_PER_SHIFT;
+    const utilRate     = maxCapacity > 0 ? ((totalDemand / maxCapacity) * 100).toFixed(1) : null;
+    const utilColor    = !utilRate ? '#888'
+      : utilRate >= 90 ? '#c0392b'
+      : utilRate >= 70 ? '#1e7e34'
+      : utilRate >= 60 ? '#e87d04'
+      : '#1a5fa8';
+    const utilTag = !utilRate ? '' : utilRate >= 90 ? 'Overload' : utilRate >= 70 ? 'Healthy' : utilRate >= 60 ? 'Caution' : 'Underutilized';
+
+    let peakHour = 0, peakCount = 0;
+    for (let h = 0; h < 24; h++) {
+      const combined = phFirst[h] + phReplied[h];
+      if (combined > peakCount) { peakCount = combined; peakHour = h; }
+    }
+
+    const badge = source === 'cached'
+      ? `<span class="source-badge cached">from database</span>`
+      : `<span class="source-badge live">live</span>`;
+
+    document.getElementById('statsRow').innerHTML = `
+      <div class="stat-card">
+        <div class="label">Total Demand ${badge}</div>
+        <div class="value">${totalDemand}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Client First Sent</div>
+        <div class="value">${clientFirst}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Coach Reached Out</div>
+        <div class="value">${coachInit}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Client Replied</div>
+        <div class="value">${clientReplied}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Active Rooms</div>
+        <div class="value">${totalActive}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Demand %</div>
+        <div class="value">${demandPct}%</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Agents Needed (8h shift)</div>
+        <div class="value">${totalDemand > 0 ? Math.ceil(totalDemand / CAPACITY_PER_SHIFT) : '—'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Utilization Rate</div>
+        <div class="value" style="color:${utilColor}">${utilRate !== null ? utilRate + '%' : '—'}</div>
+        <div style="font-size:11px;color:${utilColor};margin-top:3px;font-weight:600">${utilTag}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Peak Hour (UTC+2)</div>
+        <div class="value peak">${String(peakHour).padStart(2,'0')}:00 — ${peakCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Avg Client Msgs / Room</div>
+        <div class="value">${avgClientMsgs}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Avg Coach Msgs / Room</div>
+        <div class="value">${avgCoachMsgs}</div>
+      </div>
+    `;
+
+    const pkgRows = demandRows
+      .map(r => ({ ...r, total_demand: r.demand_rooms + r.client_replied }))
+      .sort((a, b) => b.total_demand - a.total_demand);
+
+    document.getElementById('tableBody').innerHTML = pkgRows.map(r => `
+      <tr>
+        <td>${r.package}</td>
+        <td class="num">${r.demand_rooms}</td>
+        <td class="num">${r.coach_initiated}</td>
+        <td class="num">${r.client_replied}</td>
+        <td class="num">${replyRate(r.client_replied, r.coach_initiated)}</td>
+        <td class="num"><strong>${r.total_demand}</strong></td>
+      </tr>`).join('');
+
+    document.getElementById('tableFoot').innerHTML = `
+      <tr>
+        <td>Total</td>
+        <td class="num">${clientFirst}</td>
+        <td class="num">${coachInit}</td>
+        <td class="num">${clientReplied}</td>
+        <td class="num">${replyRate(clientReplied, coachInit)}</td>
+        <td class="num"><strong>${totalDemand}</strong></td>
+      </tr>`;
+
+    const coachTotFirst   = coachRows.reduce((s, r) => s + r.demand_rooms,    0);
+    const coachTotInit    = coachRows.reduce((s, r) => s + r.coach_initiated, 0);
+    const coachTotReplied = coachRows.reduce((s, r) => s + r.client_replied,  0);
+    const coachTotDemand  = coachTotFirst + coachTotReplied;
+    const coachTotClientMsgs = coachRows.reduce((s, r) => s + (r.client_messages || 0), 0);
+    const coachTotCoachMsgs  = coachRows.reduce((s, r) => s + (r.coach_messages  || 0), 0);
+    const coachTotRooms      = coachRows.reduce((s, r) => s + (r.total_active_rooms || 0), 0);
+
+    document.getElementById('coachTableBody').innerHTML = coachRows.map(r => {
+      const td    = r.demand_rooms + r.client_replied;
+      const rooms = r.total_active_rooms || 0;
+      const avgC  = rooms > 0 ? (r.client_messages / rooms).toFixed(1) : '—';
+      const avgS  = rooms > 0 ? (r.coach_messages  / rooms).toFixed(1) : '—';
+      const uRate = ((td / CAPACITY_PER_SHIFT) * 100).toFixed(1);
+      const uColor = uRate >= 90 ? '#c0392b' : uRate >= 70 ? '#1e7e34' : uRate >= 60 ? '#e87d04' : '#1a5fa8';
+      const uTag   = uRate >= 90 ? 'Overload' : uRate >= 70 ? 'Healthy' : uRate >= 60 ? 'Caution' : 'Under';
+      return `<tr>
+        <td>${r.coach}</td>
+        <td class="num">${r.demand_rooms}</td>
+        <td class="num">${r.coach_initiated}</td>
+        <td class="num">${r.client_replied}</td>
+        <td class="num">${replyRate(r.client_replied, r.coach_initiated)}</td>
+        <td class="num"><strong>${td}</strong></td>
+        <td class="num" style="color:${uColor};font-weight:600">${uRate}% <span style="font-size:10px">${uTag}</span></td>
+        <td class="num">${avgC}</td>
+        <td class="num">${avgS}</td>
+      </tr>`;
+    }).join('');
+
+    const totURate  = coachRows.length > 0 ? ((coachTotDemand / (coachRows.length * CAPACITY_PER_SHIFT)) * 100).toFixed(1) : null;
+    const totUColor = !totURate ? '#888' : totURate >= 90 ? '#c0392b' : totURate >= 70 ? '#1e7e34' : totURate >= 60 ? '#e87d04' : '#1a5fa8';
+    document.getElementById('coachTableFoot').innerHTML = `
+      <tr>
+        <td>Total</td>
+        <td class="num">${coachTotFirst}</td>
+        <td class="num">${coachTotInit}</td>
+        <td class="num">${coachTotReplied}</td>
+        <td class="num">${replyRate(coachTotReplied, coachTotInit)}</td>
+        <td class="num"><strong>${coachTotDemand}</strong></td>
+        <td class="num" style="color:${totUColor};font-weight:600">${totURate !== null ? totURate + '%' : '—'}</td>
+        <td class="num">${coachTotRooms > 0 ? (coachTotClientMsgs / coachTotRooms).toFixed(1) : '—'}</td>
+        <td class="num">${coachTotRooms > 0 ? (coachTotCoachMsgs  / coachTotRooms).toFixed(1) : '—'}</td>
+      </tr>`;
+
+    const fromHour = ((new Date(data.from).getUTCHours() + UTC_OFFSET) % 24 + 24) % 24;
+    const toHour   = ((new Date(data.to).getUTCHours()   + UTC_OFFSET) % 24 + 24) % 24;
+    let span = (toHour - fromHour + 24) % 24;
+    if (span === 0) span = 24;
+    const visibleHours = Array.from({ length: Math.min(span + 1, 24) }, (_, i) => (fromHour + i) % 24);
+
+    const totalByHour = phFirst.map((v, i) => v + phReplied[i]);
+    const top3 = new Set(
+      [...visibleHours]
+        .filter(h => totalByHour[h] > 0)
+        .sort((a, b) => totalByHour[b] - totalByHour[a])
+        .slice(0, 3)
+    );
+
+    const labels      = visibleHours.map(h => `${String(h).padStart(2,'0')}:00`);
+    const dataFirst   = visibleHours.map(h => phFirst[h]);
+    const dataReplied = visibleHours.map(h => phReplied[h]);
+    const bgFirst     = visibleHours.map(h => top3.has(h) ? 'rgba(37,99,235,1)'   : 'rgba(37,99,235,.38)');
+    const bgReplied   = visibleHours.map(h => top3.has(h) ? 'rgba(22,163,74,1)'   : 'rgba(22,163,74,.38)');
+
+    if (chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(document.getElementById('chart').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Client First Sent', data: dataFirst,   backgroundColor: bgFirst,   stack: 'demand' },
+          { label: 'Client Replied',    data: dataReplied, backgroundColor: bgReplied, stack: 'demand' }
+        ]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'top' },
+          title: { display: true, text: `Demand Rooms by Hour — ${rangeLabel} (UTC+2)`, font: { size: 13 } },
+          tooltip: {
+            callbacks: {
+              label:  (i) => `  ${i.dataset.label}: ${i.raw}`,
+              footer: (items) => {
+                const total = items.reduce((s, i) => s + (i.raw || 0), 0);
+                return `Total: ${total}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+          y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } }
+        }
+      }
+    });
+
+    document.getElementById('result').style.display = 'block';
+    fetchSLA();
+  }
+
+  // ── UI helpers ────────────────────────────────────────────
+  function showCachePanel(cache) {
+    const savedAt    = new Date(cache.savedAt).toLocaleString();
+    const rangeLabel = `${fmtLocal(cache.from)} → ${fmtLocal(cache.to)}`;
+    document.getElementById('cachePanel').innerHTML = `
+      <div class="cache-panel">
+        <div class="icon">💾</div>
+        <div class="info">
+          <strong>Cached data found: ${rangeLabel}</strong>
+          <span class="meta">Saved ${savedAt} &nbsp;·&nbsp; UTC+2 &nbsp;·&nbsp; ${cache.total_demand_rooms} demand / ${cache.total_active_rooms} active rooms</span>
+        </div>
+        <div class="actions">
+          <button onclick="useCached()">Use Cached</button>
+          <button class="secondary" onclick="fetchFresh()">Fetch Fresh</button>
+        </div>
+      </div>`;
+    document.getElementById('cachePanel').style.display = 'block';
+  }
+
+  function hideCachePanel() {
+    document.getElementById('cachePanel').style.display = 'none';
+    pendingCache = null;
+  }
+
+  function showSaveBar(data, isOverride) {
+    const label   = isOverride ? 'Override cached data in database' : 'Save this data to database for future use';
+    const btnText = isOverride ? 'Override Cache' : 'Save to Database';
+    document.getElementById('saveBar').innerHTML = `
+      <span>${label}</span>
+      <button id="saveBtn" onclick="saveToDatabase(window.__saveData, this)">${btnText}</button>`;
+    window.__saveData = data;
+    document.getElementById('saveBar').style.display = 'flex';
+  }
+
+  function showAlert(type, msg) {
+    document.getElementById('alertArea').innerHTML = `<div class="alert ${type}">${msg}</div>`;
+  }
+  function clearAlert() { document.getElementById('alertArea').innerHTML = ''; }
+
+  function setFetchBtn(loading) {
+    const btn = document.getElementById('fetchBtn');
+    btn.disabled = loading;
+    btn.innerHTML = loading ? '<span class="spinner"></span>' : 'Fetch';
+  }
+
+  // ── Mode toggle ───────────────────────────────────────
+  function setMode(mode) {
+    document.getElementById('singleMode').style.display   = mode === 'single' ? '' : 'none';
+    document.getElementById('multiMode').style.display    = mode === 'multi'  ? '' : 'none';
+    document.getElementById('modeBtn-single').className   = 'mode-btn' + (mode === 'single' ? ' active' : '');
+    document.getElementById('modeBtn-multi').className    = 'mode-btn' + (mode === 'multi'  ? ' active' : '');
+  }
+
+  // ── Multi-day state ───────────────────────────────────
+  let multiResults     = [];
+  let multiGroups      = [];
+  let _freshIdxs       = [];
+  let _mFromTime = '18:01', _mToTime = '18:00';
+  let multiChartInstance = null;
+
+  // ── Init defaults ─────────────────────────────────────
+  (() => {
+    const today = new Date();
+    const end   = new Date(today); end.setDate(end.getDate() - 1);
+    const start = new Date(today); start.setDate(start.getDate() - 7);
+    document.getElementById('multiEnd').value   = end.toISOString().slice(0, 10);
+    document.getElementById('multiStart').value = start.toISOString().slice(0, 10);
+  })();
+
+  // ── Package filter helpers ────────────────────────────
+  function getSelectedPkgs() {
+    const all = document.querySelectorAll('.pkg-cb');
+    const checked = [...all].filter(cb => cb.checked).map(cb => cb.value);
+    return checked.length === all.length ? null : checked;
+  }
+  function toggleAllPkgs(v) {
+    document.querySelectorAll('.pkg-cb').forEach(cb => cb.checked = v);
+    if (multiGroups.length) refreshDisplay();
+  }
+  function applyPkgFilter(data, pkgs) {
+    if (!pkgs || !data) return data;
+    const rows = (data.demand_rows || []).filter(r => pkgs.includes(r.package));
+    return {
+      ...data,
+      total_demand_rooms:    rows.reduce((s, r) => s + (r.demand_rooms    || 0), 0),
+      total_active_rooms:    rows.reduce((s, r) => s + (r.total_active_rooms || 0), 0),
+      total_coach_initiated: rows.reduce((s, r) => s + (r.coach_initiated  || 0), 0),
+      total_client_replied:  rows.reduce((s, r) => s + (r.client_replied   || 0), 0),
+    };
+  }
+
+  // ── Merge multiple days' data into one ───────────────
+  function mergeData(dataArr) {
+    const out = {
+      total_demand_rooms: 0, total_active_rooms: 0,
+      total_coach_initiated: 0, total_client_replied: 0,
+      client_messages: 0, coach_messages: 0,
+      demand_rows: {}, coach_rows: {}, _source: 'merged',
+    };
+    for (const d of dataArr) {
+      if (!d) continue;
+      out.total_demand_rooms    += d.total_demand_rooms    || 0;
+      out.total_active_rooms    += d.total_active_rooms    || 0;
+      out.total_coach_initiated += d.total_coach_initiated || 0;
+      out.total_client_replied  += d.total_client_replied  || 0;
+      out.client_messages       += d.client_messages       || 0;
+      out.coach_messages        += d.coach_messages        || 0;
+      for (const r of d.demand_rows || []) {
+        if (!out.demand_rows[r.package]) out.demand_rows[r.package] = { demand_rooms:0, total_active_rooms:0, coach_initiated:0, client_replied:0 };
+        out.demand_rows[r.package].demand_rooms       += r.demand_rooms       || 0;
+        out.demand_rows[r.package].total_active_rooms += r.total_active_rooms || 0;
+        out.demand_rows[r.package].coach_initiated    += r.coach_initiated    || 0;
+        out.demand_rows[r.package].client_replied     += r.client_replied     || 0;
+      }
+      for (const r of d.coach_rows || []) {
+        if (!out.coach_rows[r.coach]) out.coach_rows[r.coach] = { demand_rooms:0, coach_initiated:0, client_replied:0, total_active_rooms:0, client_messages:0, coach_messages:0 };
+        out.coach_rows[r.coach].demand_rooms      += r.demand_rooms      || 0;
+        out.coach_rows[r.coach].coach_initiated   += r.coach_initiated   || 0;
+        out.coach_rows[r.coach].client_replied    += r.client_replied    || 0;
+        out.coach_rows[r.coach].total_active_rooms += r.total_active_rooms || 0;
+        out.coach_rows[r.coach].client_messages   += r.client_messages   || 0;
+        out.coach_rows[r.coach].coach_messages    += r.coach_messages    || 0;
+      }
+    }
+    out.demand_rows = Object.entries(out.demand_rows).map(([pkg, c]) => ({ package: pkg, ...c }));
+    out.coach_rows  = Object.entries(out.coach_rows).map(([coach, c]) => ({ coach, ...c }));
+    return out;
+  }
+
+  // ── Build day ranges ──────────────────────────────────
+  function buildDayRanges(startDate, endDate, fromTime, toTime) {
+    const ranges = [];
+    let cur = new Date(startDate + 'T12:00:00');
+    const end = new Date(endDate + 'T12:00:00');
+    while (cur <= end) {
+      const dateStr  = cur.toISOString().slice(0, 10);
+      const nextDate = new Date(cur); nextDate.setDate(nextDate.getDate() + 1);
+      const nextStr  = nextDate.toISOString().slice(0, 10);
+      ranges.push({ label: dateStr, fromUTC: toUTC(`${dateStr}T${fromTime}`), toUTC: toUTC(`${nextStr}T${toTime}`) });
+      cur.setDate(cur.getDate() + 1);
+    }
+    return ranges;
+  }
+
+  // ── Fetch ─────────────────────────────────────────────
+  async function onMultiFetch(forceFresh = false) {
+    const startDate = document.getElementById('multiStart').value;
+    const endDate   = document.getElementById('multiEnd').value;
+    _mFromTime = document.getElementById('multiFromTime').value || '18:01';
+    _mToTime   = document.getElementById('multiToTime').value   || '18:00';
+
+    if (!startDate || !endDate) { showMultiAlert('error', 'Please select Start and End dates.'); return; }
+    if (startDate > endDate)    { showMultiAlert('error', 'Start must be before End.'); return; }
+
+    const ranges = buildDayRanges(startDate, endDate, _mFromTime, _mToTime);
+    if (ranges.length > 31) { showMultiAlert('error', 'Maximum 31 days at a time.'); return; }
+
+    setMultiFetchBtn(true);
+    document.getElementById('multiResult').style.display = 'none';
+    document.getElementById('multiSaveBar').style.display = 'none';
+    document.getElementById('multiSlaResult').style.display = 'none';
+    document.getElementById('multiSlaAlertArea').innerHTML = '';
+    document.getElementById('multiSlaBtn').innerHTML = 'Calculate SLA';
+    document.getElementById('multiSlaBtn').disabled = false;
+    multiResults = []; _freshIdxs = [];
+
+    for (let i = 0; i < ranges.length; i++) {
+      const { label, fromUTC, toUTC: toUTC_ } = ranges[i];
+      showMultiAlert('loading',
+        `<span class="spinner"></span>Day ${i+1}/${ranges.length}: ${label}…` +
+        `<div class="progress-bar-wrap"><div class="progress-bar" style="width:${(i/ranges.length*100).toFixed(0)}%"></div></div>`
+      );
+      try {
+        let data;
+        if (!forceFresh) {
+          const cacheRes = await authFetch(`/api/daily-stats-cache?from=${encodeURIComponent(fromUTC)}&to=${encodeURIComponent(toUTC_)}`);
+          const cache    = await cacheRes.json();
+          if (cache.exists) {
+            data = { ...cache, _source: 'cached' };
+          }
+        }
+        if (!data) {
+          const res = await authFetch(`/api/daily-stats?from=${encodeURIComponent(fromUTC)}&to=${encodeURIComponent(toUTC_)}`);
+          data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Unknown error');
+          data._source = 'live';
+          _freshIdxs.push(i);
+        }
+        multiResults.push({ label, fromUTC, toUTC: toUTC_, data });
+      } catch (err) {
+        multiResults.push({ label, fromUTC, toUTC: toUTC_, data: null, error: err.message });
+      }
+    }
+
+    clearMultiAlert();
+    setMultiFetchBtn(false);
+
+    if (!multiResults.some(r => r.data?.total_active_rooms)) {
+      showMultiAlert('empty', 'No data found for any day in this range.'); return;
+    }
+
+    multiGroups = multiResults.map((_, i) => [i]);
+
+    const saveBtn = document.getElementById('multiSaveBtn');
+    if (_freshIdxs.length > 0) {
+      document.getElementById('multiSaveMsg').textContent =
+        `${_freshIdxs.length} day${_freshIdxs.length > 1 ? 's' : ''} fetched fresh — save to cache for faster future loads`;
+      saveBtn.style.display = '';
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save to Cache';
+      saveBtn.className = '';
+    } else {
+      document.getElementById('multiSaveMsg').textContent = 'All days loaded from cache';
+      saveBtn.style.display = 'none';
+    }
+    document.getElementById('multiSaveBar').style.display = 'flex';
+
+    refreshDisplay();
+  }
+
+  // ── Refresh display ───────────────────────────────────
+  function refreshDisplay() {
+    const pkgs = getSelectedPkgs();
+    const entries = multiGroups.map((indices, gi) => {
+      const items   = indices.map(i => multiResults[i]);
+      const rawData = indices.length === 1 ? items[0].data : mergeData(items.map(it => it.data));
+      const data    = pkgs ? applyPkgFilter(rawData, pkgs) : rawData;
+      const label   = indices.length === 1 ? items[0].label : items.map(it => it.label).join(' + ');
+      const source  = indices.length === 1 ? (items[0].data?._source || 'live') : 'merged';
+      return { label, data, rawData, indices, groupIdx: gi, source };
+    });
+    renderDisplay(entries);
+  }
+
+  // ── Render ────────────────────────────────────────────
+  function renderDisplay(entries) {
+    const valid = entries.filter(e => e.data?.total_active_rooms);
+    const n     = valid.length;
+    if (!n) return;
+
+    let sumActive = 0, sumFirst = 0, sumInit = 0, sumReplied = 0;
+    for (const { data } of valid) {
+      sumActive   += data.total_active_rooms    || 0;
+      sumFirst    += data.total_demand_rooms    || 0;
+      sumInit     += data.total_coach_initiated || 0;
+      sumReplied  += data.total_client_replied  || 0;
+    }
+    const sumDemand = sumFirst + sumReplied;
+    const avgActive  = (sumActive  / n).toFixed(1);
+    const avgFirst   = (sumFirst   / n).toFixed(1);
+    const avgInit    = (sumInit    / n).toFixed(1);
+    const avgReplied = (sumReplied / n).toFixed(1);
+    const avgDemand  = (sumDemand  / n).toFixed(1);
+    const avgRR      = sumInit > 0 ? ((sumReplied / sumInit) * 100).toFixed(1) + '%' : '—';
+    const avgDemPct  = sumActive > 0 ? ((sumDemand / sumActive) * 100).toFixed(1) + '%' : '—';
+
+    const sumClientMsgs = valid.reduce((s, e) => s + (e.data?.client_messages || 0), 0);
+    const sumCoachMsgs  = valid.reduce((s, e) => s + (e.data?.coach_messages  || 0), 0);
+    const avgClientMsgsPerRoom = sumActive > 0 ? (sumClientMsgs / sumActive).toFixed(1) : '—';
+    const avgCoachMsgsPerRoom  = sumActive > 0 ? (sumCoachMsgs  / sumActive).toFixed(1) : '—';
+
+    const mAgentsNeeded = parseFloat(avgDemand) > 0 ? Math.ceil(parseFloat(avgDemand) / CAPACITY_PER_SHIFT) : 0;
+    const mMaxCapacity  = mAgentsNeeded * CAPACITY_PER_SHIFT;
+    const mUtilRate     = mMaxCapacity > 0 ? ((parseFloat(avgDemand) / mMaxCapacity) * 100).toFixed(1) : null;
+    const mUtilColor    = !mUtilRate ? '#888'
+      : mUtilRate >= 90 ? '#c0392b'
+      : mUtilRate >= 70 ? '#1e7e34'
+      : mUtilRate >= 60 ? '#e87d04'
+      : '#1a5fa8';
+    const mUtilTag = !mUtilRate ? '' : mUtilRate >= 90 ? 'Overload' : mUtilRate >= 70 ? 'Healthy' : mUtilRate >= 60 ? 'Caution' : 'Underutilized';
+
+    document.getElementById('multiSummaryRow').innerHTML = `
+      <div class="stat-card"><div class="label">Periods</div><div class="value">${n}</div></div>
+      <div class="stat-card"><div class="label">Avg Total Demand</div><div class="value">${avgDemand}</div></div>
+      <div class="stat-card"><div class="label">Avg Client First</div><div class="value">${avgFirst}</div></div>
+      <div class="stat-card"><div class="label">Avg Reached Out</div><div class="value">${avgInit}</div></div>
+      <div class="stat-card"><div class="label">Avg Client Replied</div><div class="value">${avgReplied}</div></div>
+      <div class="stat-card"><div class="label">Avg Active Rooms</div><div class="value">${avgActive}</div></div>
+      <div class="stat-card"><div class="label">Overall Reply Rate</div><div class="value">${avgRR}</div></div>
+      <div class="stat-card"><div class="label">Avg Demand %</div><div class="value">${avgDemPct}</div></div>
+      <div class="stat-card"><div class="label">Agents Needed (avg demand)</div><div class="value">${sumDemand > 0 ? Math.ceil(parseFloat(avgDemand) / CAPACITY_PER_SHIFT) : '—'}</div></div>
+      <div class="stat-card"><div class="label">Utilization Rate</div><div class="value" style="color:${mUtilColor}">${mUtilRate !== null ? mUtilRate + '%' : '—'}</div><div style="font-size:11px;color:${mUtilColor};margin-top:3px;font-weight:600">${mUtilTag}</div></div>
+      <div class="stat-card"><div class="label">Avg Client Msgs / Room</div><div class="value">${avgClientMsgsPerRoom}</div></div>
+      <div class="stat-card"><div class="label">Avg Coach Msgs / Room</div><div class="value">${avgCoachMsgsPerRoom}</div></div>
+    `;
+
+    const hasGroups = multiGroups.some(g => g.length > 1);
+    document.getElementById('resetGroupsBtn').style.display = hasGroups ? '' : 'none';
+    document.getElementById('combineBtn').style.display = 'none';
+
+    document.getElementById('multiDailyBody').innerHTML = entries.map(({ label, data, error, indices, groupIdx, source }) => {
+      if (error || !data) return `<tr><td></td><td>${label}</td><td class="num" colspan="7" style="color:#c0392b">${error || 'No data'}</td></tr>`;
+      const demand = (data.total_demand_rooms || 0) + (data.total_client_replied || 0);
+      const active = data.total_active_rooms || 0;
+      const demPct = active > 0 ? ((demand / active) * 100).toFixed(1) + '%' : '—';
+      const srcBadge = source === 'cached'
+        ? `<span class="source-badge cached" style="float:right">cache</span>`
+        : source === 'merged'
+          ? `<span class="source-badge" style="float:right;background:#f3e8ff;color:#6b21a8">merged</span>`
+          : `<span class="source-badge live" style="float:right">live</span>`;
+      const isMerged = indices.length > 1;
+      const firstCell = isMerged
+        ? `<button class="ungroup-btn" onclick="ungroupAt(${groupIdx})" title="Ungroup this merged period">✕</button>`
+        : `<input type="checkbox" class="day-cb" data-gi="${groupIdx}" onchange="onDayCbChange()">`;
+      return `<tr>
+        <td style="text-align:center">${firstCell}</td>
+        <td>${label}${srcBadge}</td>
+        <td class="num">${active}</td>
+        <td class="num">${data.total_demand_rooms    || 0}</td>
+        <td class="num">${data.total_coach_initiated || 0}</td>
+        <td class="num">${data.total_client_replied  || 0}</td>
+        <td class="num">${replyRate(data.total_client_replied, data.total_coach_initiated)}</td>
+        <td class="num"><strong>${demand}</strong></td>
+        <td class="num">${demPct}</td>
+        <td class="num">${active > 0 ? ((data.client_messages || 0) / active).toFixed(1) : '—'}</td>
+        <td class="num">${active > 0 ? ((data.coach_messages  || 0) / active).toFixed(1) : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('multiDailyFoot').innerHTML = `
+      <tr>
+        <td></td><td>Average (${n} periods)</td>
+        <td class="num">${avgActive}</td>
+        <td class="num">${avgFirst}</td>
+        <td class="num">${avgInit}</td>
+        <td class="num">${avgReplied}</td>
+        <td class="num">${avgRR}</td>
+        <td class="num"><strong>${avgDemand}</strong></td>
+        <td class="num">${avgDemPct}</td>
+        <td class="num">${avgClientMsgsPerRoom}</td>
+        <td class="num">${avgCoachMsgsPerRoom}</td>
+      </tr>`;
+
+    if (multiChartInstance) multiChartInstance.destroy();
+    multiChartInstance = new Chart(document.getElementById('multiChart').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: entries.map(e => e.label),
+        datasets: [
+          { label: 'Client First Sent', data: entries.map(e => e.data?.total_demand_rooms   || 0), backgroundColor: 'rgba(37,99,235,.75)', stack: 'demand' },
+          { label: 'Client Replied',    data: entries.map(e => e.data?.total_client_replied || 0), backgroundColor: 'rgba(22,163,74,.75)',  stack: 'demand' },
+        ]
+      },
+      options: {
+        responsive: true, interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'top' },
+          title: { display: true, text: `Demand by Day — ${_mFromTime} → ${_mToTime} (UTC+2)`, font: { size: 13 } },
+          tooltip: {
+            callbacks: {
+              label:  (i) => `  ${i.dataset.label}: ${i.raw}`,
+              footer: (items) => `Total: ${items.reduce((s, i) => s + (i.raw || 0), 0)}`
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+          y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } }
+        }
+      }
+    });
+
+    // Coach table — always raw (unfiltered) data
+    const coachAgg = {};
+    for (const { rawData } of valid) {
+      for (const r of rawData?.coach_rows || []) {
+        if (!coachAgg[r.coach]) coachAgg[r.coach] = { demand_rooms: 0, coach_initiated: 0, client_replied: 0, client_messages: 0, coach_messages: 0, total_active_rooms: 0, appearances: 0 };
+        coachAgg[r.coach].demand_rooms       += r.demand_rooms      || 0;
+        coachAgg[r.coach].coach_initiated    += r.coach_initiated   || 0;
+        coachAgg[r.coach].client_replied     += r.client_replied    || 0;
+        coachAgg[r.coach].client_messages    += r.client_messages   || 0;
+        coachAgg[r.coach].coach_messages     += r.coach_messages    || 0;
+        coachAgg[r.coach].total_active_rooms += r.total_active_rooms || 0;
+        coachAgg[r.coach].appearances++;
+      }
+    }
+    const coachRows2 = Object.entries(coachAgg)
+      .map(([coach, c]) => ({ coach, ...c, total: c.demand_rooms + c.client_replied }))
+      .sort((a, b) => b.total - a.total);
+
+    document.getElementById('multiCoachBody').innerHTML = coachRows2.map(r => {
+      const rooms   = r.total_active_rooms || 0;
+      const avgCltM = rooms > 0 ? (r.client_messages / rooms).toFixed(1) : '—';
+      const avgCchM = rooms > 0 ? (r.coach_messages  / rooms).toFixed(1) : '—';
+      const avgDay  = (r.total / Math.max(r.appearances, 1)).toFixed(1);
+      const mUR     = ((parseFloat(avgDay) / CAPACITY_PER_SHIFT) * 100).toFixed(1);
+      const mUColor = mUR >= 90 ? '#c0392b' : mUR >= 70 ? '#1e7e34' : mUR >= 60 ? '#e87d04' : '#1a5fa8';
+      const mUTag   = mUR >= 90 ? 'Overload' : mUR >= 70 ? 'Healthy' : mUR >= 60 ? 'Caution' : 'Under';
+      return `<tr>
+        <td>${r.coach}</td>
+        <td class="num">${r.demand_rooms}</td>
+        <td class="num">${r.coach_initiated}</td>
+        <td class="num">${r.client_replied}</td>
+        <td class="num">${replyRate(r.client_replied, r.coach_initiated)}</td>
+        <td class="num"><strong>${r.total}</strong></td>
+        <td class="num">${avgDay}</td>
+        <td class="num" style="color:${mUColor};font-weight:600">${mUR}% <span style="font-size:10px">${mUTag}</span></td>
+        <td class="num">${avgCltM}</td>
+        <td class="num">${avgCchM}</td>
+      </tr>`;
+    }).join('');
+
+    const cF          = coachRows2.reduce((s, r) => s + r.demand_rooms,    0);
+    const cI          = coachRows2.reduce((s, r) => s + r.coach_initiated, 0);
+    const cR          = coachRows2.reduce((s, r) => s + r.client_replied,  0);
+    const cClientMsgs = coachRows2.reduce((s, r) => s + r.client_messages, 0);
+    const cCoachMsgs  = coachRows2.reduce((s, r) => s + r.coach_messages,  0);
+    const cTotalRooms = coachRows2.reduce((s, r) => s + r.total_active_rooms, 0);
+    const cAvgDay   = ((cF + cR) / Math.max(n, 1)).toFixed(1);
+    const cUR       = coachRows2.length > 0 ? ((parseFloat(cAvgDay) / CAPACITY_PER_SHIFT) * 100).toFixed(1) : null;
+    const cUColor   = !cUR ? '#888' : cUR >= 90 ? '#c0392b' : cUR >= 70 ? '#1e7e34' : cUR >= 60 ? '#e87d04' : '#1a5fa8';
+    document.getElementById('multiCoachFoot').innerHTML = `
+      <tr>
+        <td>Total (${n} periods)</td>
+        <td class="num">${cF}</td><td class="num">${cI}</td><td class="num">${cR}</td>
+        <td class="num">${replyRate(cR, cI)}</td>
+        <td class="num"><strong>${cF + cR}</strong></td>
+        <td class="num">${cAvgDay}</td>
+        <td class="num" style="color:${cUColor};font-weight:600">${cUR !== null ? cUR + '%' : '—'}</td>
+        <td class="num">${cTotalRooms > 0 ? (cClientMsgs / cTotalRooms).toFixed(1) : '—'}</td>
+        <td class="num">${cTotalRooms > 0 ? (cCoachMsgs  / cTotalRooms).toFixed(1) : '—'}</td>
+      </tr>`;
+
+    document.getElementById('multiResult').style.display = 'block';
+    fetchMultiSLA();
+  }
+
+  // ── Day combining ─────────────────────────────────────
+  function onDayCbChange() {
+    const n = document.querySelectorAll('.day-cb:checked').length;
+    document.getElementById('combineBtn').style.display = n >= 2 ? '' : 'none';
+  }
+
+  function combineSelected() {
+    const selectedGIs = [...document.querySelectorAll('.day-cb:checked')]
+      .map(cb => parseInt(cb.dataset.gi)).sort((a, b) => a - b);
+    if (selectedGIs.length < 2) return;
+    const combinedIndices = selectedGIs.flatMap(gi => multiGroups[gi]);
+    const newGroups = [];
+    for (let i = 0; i < multiGroups.length; i++) {
+      if (i === selectedGIs[0]) newGroups.push(combinedIndices);
+      else if (!selectedGIs.includes(i)) newGroups.push(multiGroups[i]);
+    }
+    multiGroups = newGroups;
+    document.getElementById('combineBtn').style.display = 'none';
+    refreshDisplay();
+  }
+
+  function ungroupAt(groupIdx) {
+    const toSplit = multiGroups[groupIdx];
+    if (toSplit.length <= 1) return;
+    multiGroups = [...multiGroups.slice(0, groupIdx), ...toSplit.map(i => [i]), ...multiGroups.slice(groupIdx + 1)];
+    refreshDisplay();
+  }
+
+  function resetGroups() {
+    multiGroups = multiResults.map((_, i) => [i]);
+    refreshDisplay();
+  }
+
+  // ── Save to cache ─────────────────────────────────────
+  async function saveAllToCache() {
+    const btn = document.getElementById('multiSaveBtn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    let saved = 0;
+    for (const idx of _freshIdxs) {
+      const r = multiResults[idx];
+      if (!r?.data) continue;
+      try {
+        await authFetch('/api/daily-stats-cache', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(r.data),
+        });
+        saved++;
+      } catch {}
+    }
+    btn.textContent = `✓ Saved ${saved} day${saved !== 1 ? 's' : ''}`;
+    btn.className = 'success';
+    _freshIdxs = [];
+    setTimeout(() => { document.getElementById('multiSaveBar').style.display = 'none'; }, 3000);
+  }
+
+  function showMultiAlert(type, msg) {
+    document.getElementById('multiAlertArea').innerHTML = `<div class="alert ${type}">${msg}</div>`;
+  }
+  function clearMultiAlert() { document.getElementById('multiAlertArea').innerHTML = ''; }
+
+  function setMultiFetchBtn(loading) {
+    const btn = document.getElementById('multiFetchBtn');
+    btn.disabled = loading;
+    btn.innerHTML = loading ? '<span class="spinner"></span>' : 'Fetch All';
+  }
+
+  // ── SLA ───────────────────────────────────────────────────
+  async function fetchSLA() {
+    const fromVal = document.getElementById('fromPicker').value;
+    const toVal   = document.getElementById('toPicker').value;
+    if (!fromVal || !toVal) return;
+
+    const btn = document.getElementById('slaBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    document.getElementById('slaAlertArea').innerHTML =
+      '<div class="alert loading"><span class="spinner"></span>Calculating SLA… fetching reply times for each room. This may take a moment.</div>';
+    document.getElementById('slaResult').style.display = 'none';
+
+    try {
+      const from = toUTC(fromVal);
+      const to   = toUTC(toVal);
+      const res  = await authFetch(`/api/sla-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        document.getElementById('slaAlertArea').innerHTML = `<div class="alert error">${data.error || 'Unknown error'}</div>`;
+        return;
+      }
+      document.getElementById('slaAlertArea').innerHTML = '';
+      renderSLA(data.sla_rows || [], 'single', data.sla_coach_rows || []);
+    } catch (err) {
+      document.getElementById('slaAlertArea').innerHTML = `<div class="alert error">Failed: ${err.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Recalculate SLA';
+    }
+  }
+
+  async function fetchMultiSLA() {
+    if (!multiResults.length) return;
+    const from = multiResults[0].fromUTC;
+    const to   = multiResults[multiResults.length - 1].toUTC;
+
+    const btn = document.getElementById('multiSlaBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    document.getElementById('multiSlaAlertArea').innerHTML =
+      '<div class="alert loading"><span class="spinner"></span>Calculating SLA across full range… this may take a moment.</div>';
+    document.getElementById('multiSlaResult').style.display = 'none';
+
+    try {
+      const res  = await authFetch(`/api/sla-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        document.getElementById('multiSlaAlertArea').innerHTML = `<div class="alert error">${data.error || 'Unknown error'}</div>`;
+        return;
+      }
+      document.getElementById('multiSlaAlertArea').innerHTML = '';
+      renderSLA(data.sla_rows || [], 'multi', data.sla_coach_rows || []);
+    } catch (err) {
+      document.getElementById('multiSlaAlertArea').innerHTML = `<div class="alert error">Failed: ${err.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Recalculate SLA';
+    }
+  }
+
+  function renderSLA(rows, target = 'single', coachRows = []) {
+    const tbodyId      = target === 'multi' ? 'multiSlaTableBody' : 'slaTableBody';
+    const resultId     = target === 'multi' ? 'multiSlaResult'    : 'slaResult';
+    const coachTbodyId = target === 'multi' ? 'multiSlaCoachBody' : 'slaCoachBody';
+
+    if (!rows.length) {
+      document.getElementById(tbodyId).innerHTML =
+        '<tr><td colspan="9" style="text-align:center;color:#888;padding:20px">No SLA data for this period</td></tr>';
+      document.getElementById(resultId).style.display = 'block';
+      return;
+    }
+
+    document.getElementById(tbodyId).innerHTML = rows.map(r => {
+      const rate     = r.sla_rate;
+      const slaColor = rate === null ? '#888' : rate >= 90 ? '#1e7e34' : rate >= 75 ? '#e87d04' : '#c0392b';
+      const slaTag   = rate === null ? '' : rate >= 90 ? 'On Track' : rate >= 75 ? 'At Risk' : 'Breaching';
+      const rateCell = `<td class="num" style="color:${slaColor};font-weight:700">
+        ${rate !== null ? rate + '%' : '—'}
+        <div style="font-size:10px;font-weight:600">${slaTag}</div>
+      </td>`;
+
+      if (r.sla_type === 'weekly') {
+        const bRate  = r.rooms > 0 ? ((r.breach_count / r.rooms) * 100).toFixed(1) : null;
+        const bColor = bRate === null ? '#888' : bRate <= 10 ? '#1e7e34' : bRate <= 25 ? '#e87d04' : '#c0392b';
+        return `<tr>
+          <td><strong>${r.package}</strong></td>
+          <td>${r.sla_target}</td>
+          <td>${r.sla_window}</td>
+          <td class="num">${r.rooms} rooms</td>
+          <td class="num">${r.rooms_with_reply}</td>
+          <td class="num">${r.breach_count}</td>
+          <td class="num">—</td>
+          <td class="num" style="color:${bColor};font-weight:700">${bRate !== null ? bRate + '%' : '—'}</td>
+          ${rateCell}
+        </tr>`;
+      }
+      const breachTotal = (r.breach || 0) + (r.noReply || 0);
+      const bRate  = r.total > 0 ? ((breachTotal / r.total) * 100).toFixed(1) : null;
+      const bColor = bRate === null ? '#888' : bRate <= 10 ? '#1e7e34' : bRate <= 25 ? '#e87d04' : '#c0392b';
+      return `<tr>
+        <td><strong>${r.package}</strong></td>
+        <td>${r.sla_target}</td>
+        <td style="font-size:12px;color:#666">${r.sla_window}</td>
+        <td class="num">${r.total}</td>
+        <td class="num">${r.within}</td>
+        <td class="num">${r.breach}</td>
+        <td class="num">${r.noReply}</td>
+        <td class="num" style="color:${bColor};font-weight:700">${bRate !== null ? bRate + '%' : '—'}</td>
+        ${rateCell}
+      </tr>`;
+    }).join('');
+
+    const coachTbody = document.getElementById(coachTbodyId);
+    if (coachTbody) {
+      if (!coachRows.length) {
+        coachTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;padding:16px">No agent SLA data</td></tr>';
+      } else {
+        coachTbody.innerHTML = coachRows.map(r => {
+          const breachTotal = (r.breach || 0) + (r.noReply || 0);
+          const bRate  = r.total > 0 ? ((breachTotal / r.total) * 100).toFixed(1) : null;
+          const bColor = bRate === null ? '#888' : bRate <= 10 ? '#1e7e34' : bRate <= 25 ? '#e87d04' : '#c0392b';
+          const sRate  = r.sla_rate;
+          const sColor = sRate === null ? '#888' : sRate >= 90 ? '#1e7e34' : sRate >= 75 ? '#e87d04' : '#c0392b';
+          const sTag   = sRate === null ? '' : sRate >= 90 ? 'On Track' : sRate >= 75 ? 'At Risk' : 'Breaching';
+          return `<tr>
+            <td><strong>${r.coach}</strong></td>
+            <td class="num">${r.total}</td>
+            <td class="num">${r.within}</td>
+            <td class="num">${r.breach}</td>
+            <td class="num">${r.noReply}</td>
+            <td class="num" style="color:${bColor};font-weight:700">${bRate !== null ? bRate + '%' : '—'}</td>
+            <td class="num" style="color:${sColor};font-weight:700">${sRate !== null ? sRate + '%' : '—'}<div style="font-size:10px;font-weight:600">${sTag}</div></td>
+          </tr>`;
+        }).join('');
+      }
+    }
+
+    document.getElementById(resultId).style.display = 'block';
+  }
+</script>
+</body>
+</html>

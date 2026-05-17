@@ -119,6 +119,7 @@ const salaryRoutes = require("./routes/salaries")(sql, requireAdmin);
 const agentOverviewRoutes = require("./routes/agent-overview")(sql, getCachedSettings);
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
 const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin);
+const demandReportRoutes = require("./routes/demand-report")(sql, supabase, ensureSupabaseAuth, requireAdmin);
 const { computeGapIdle } = require("./utils/shift-utils");
 
 // CORS: restrict to known clients (dev + production + FlexCoach host page for content scripts)
@@ -152,6 +153,7 @@ app.use("/api/salaries", salaryRoutes);
 app.use("/api/agent-overview", agentOverviewRoutes);
 app.use("/api", activityEventRoutes);
 app.use("/api/staff-assignator", staffAssignatorRoutes);
+app.use("/api", demandReportRoutes);
 
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "login.html"));
@@ -1347,6 +1349,28 @@ app.listen(PORT, async () => {
         await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS shift_start_time TIME`;
         await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS shift_end_time TIME`;
         await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS sla_cutoff_time TIME`;
+
+        // Demand report cache — stores pre-computed daily stats for fast reloads
+        await sql`
+            CREATE TABLE IF NOT EXISTS daily_stats_cache (
+                range_key              TEXT PRIMARY KEY,
+                range_from             TIMESTAMPTZ NOT NULL,
+                range_to               TIMESTAMPTZ NOT NULL,
+                peak_hours_client_first   JSONB NOT NULL DEFAULT '[]',
+                peak_hours_client_replied JSONB NOT NULL DEFAULT '[]',
+                demand_rows            JSONB NOT NULL DEFAULT '[]',
+                coach_rows             JSONB NOT NULL DEFAULT '[]',
+                total_demand_rooms     INT NOT NULL DEFAULT 0,
+                total_active_rooms     INT NOT NULL DEFAULT 0,
+                total_coach_initiated  INT NOT NULL DEFAULT 0,
+                total_client_replied   INT NOT NULL DEFAULT 0,
+                client_messages        INT NOT NULL DEFAULT 0,
+                coach_messages         INT NOT NULL DEFAULT 0,
+                saved_at               TIMESTAMPTZ DEFAULT NOW()
+            )
+        `;
+        await sql`ALTER TABLE daily_stats_cache ADD COLUMN IF NOT EXISTS client_messages INT NOT NULL DEFAULT 0`;
+        await sql`ALTER TABLE daily_stats_cache ADD COLUMN IF NOT EXISTS coach_messages  INT NOT NULL DEFAULT 0`;
 
         // Seed default admin
         const existingAdmin = await sql`SELECT id FROM admins WHERE email = 'admin@fitstn.com'`;
