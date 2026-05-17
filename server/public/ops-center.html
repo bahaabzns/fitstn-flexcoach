@@ -6,12 +6,37 @@
     <title>Ops Center</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <style>
+        :root {
+            --bg:          #f0f2f5;
+            --surface:     #fff;
+            --surface-alt: #f8f9fa;
+            --text:        #1a1a1a;
+            --text-2:      #444;
+            --text-muted:  #888;
+            --border:      #e0e0e0;
+            --border-light:#eee;
+            --shadow:      rgba(0,0,0,0.08);
+        }
+        [data-theme="dark"] {
+            --bg:          #0d1117;
+            --surface:     #161b22;
+            --surface-alt: #1c2128;
+            --text:        #e0e0e0;
+            --text-2:      #adbac7;
+            --text-muted:  #768390;
+            --border:      #30363d;
+            --border-light:#21262d;
+            --shadow:      rgba(0,0,0,0.3);
+        }
+
         *, *::before, *::after { box-sizing: border-box; }
         body {
             font-family: Arial, sans-serif;
             margin: 0;
-            background: #f0f2f5;
+            background: var(--bg);
+            color: var(--text);
             padding-top: 0;
+            transition: background 0.2s, color 0.2s;
         }
 
         /* ── Alert Bar ─────────────────────────────────────────────────────── */
@@ -43,8 +68,8 @@
 
         /* ── Page Header / Nav ─────────────────────────────────────────────── */
         .page-header {
-            background: #fff;
-            border-bottom: 1px solid #e0e0e0;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
             position: sticky;
             top: 0;
             z-index: 100;
@@ -58,19 +83,19 @@
             height: 56px;
         }
         .header-left { display: flex; align-items: center; gap: 24px; }
-        .header-title { font-size: 18px; font-weight: bold; color: #1a1a1a; white-space: nowrap; }
+        .header-title { font-size: 18px; font-weight: bold; color: var(--text); white-space: nowrap; }
         nav { display: flex; gap: 4px; }
         nav a {
             text-decoration: none;
-            color: #555;
+            color: var(--text-2);
             font-size: 13px;
             font-weight: 500;
             padding: 6px 12px;
             border-radius: 6px;
             transition: background 0.15s;
         }
-        nav a:hover { background: #f0f2f5; color: #333; }
-        nav a.active { background: #333; color: #fff; }
+        nav a:hover { background: var(--surface-alt); color: var(--text); }
+        nav a.active { background: var(--text); color: var(--surface); }
         .logout-btn {
             padding: 6px 14px;
             background: #dc3545;
@@ -132,8 +157,8 @@
 
         /* ── Tab Nav ───────────────────────────────────────────────────────── */
         .tab-nav {
-            background: #fff;
-            border-bottom: 1px solid #e0e0e0;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
             display: flex;
             gap: 0;
             padding: 0 24px;
@@ -144,13 +169,13 @@
             background: none;
             font-size: 14px;
             font-weight: 500;
-            color: #777;
+            color: var(--text-muted);
             cursor: pointer;
             border-bottom: 2px solid transparent;
             transition: color 0.15s, border-color 0.15s;
         }
-        .tab-btn:hover { color: #333; }
-        .tab-btn.active { color: #1a1a1a; border-bottom-color: #1a1a1a; }
+        .tab-btn:hover { color: var(--text); }
+        .tab-btn.active { color: var(--text); border-bottom-color: var(--text); }
         .tab-badge {
             display: inline-block;
             background: #dc3545;
@@ -172,7 +197,7 @@
         .section-title {
             font-size: 14px;
             font-weight: 700;
-            color: #444;
+            color: var(--text-2);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin: 0 0 14px 0;
@@ -181,10 +206,10 @@
         /* ── Exec Summary ──────────────────────────────────────────────────── */
         .exec-row { display: flex; gap: 16px; flex-wrap: wrap; }
         .health-card {
-            background: #fff;
+            background: var(--surface);
             border-radius: 10px;
             padding: 20px 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow: 0 1px 3px var(--shadow);
             flex: 0 0 auto;
             min-width: 200px;
             text-align: center;
@@ -198,7 +223,7 @@
         .health-score-num.green  { color: #16a34a; }
         .health-score-num.yellow { color: #d97706; }
         .health-score-num.red    { color: #dc2626; }
-        .health-score-label { font-size: 12px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .health-score-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
         .health-score-status { font-size: 13px; font-weight: 600; margin-top: 4px; }
         .health-score-status.green  { color: #16a34a; }
         .health-score-status.yellow { color: #d97706; }
@@ -206,35 +231,35 @@
 
         .sub-scores { flex: 1; display: flex; gap: 14px; flex-wrap: wrap; align-items: stretch; }
         .sub-score-card {
-            background: #fff;
+            background: var(--surface);
             border-radius: 10px;
             padding: 16px 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow: 0 1px 3px var(--shadow);
             flex: 1 1 160px;
         }
-        .sub-score-name { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .sub-score-name { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
         .sub-score-value { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
-        .sub-score-bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
+        .sub-score-bar { height: 6px; background: var(--border-light); border-radius: 3px; overflow: hidden; }
         .sub-score-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
         .sub-score-fill.green  { background: #22c55e; }
         .sub-score-fill.yellow { background: #f59e0b; }
         .sub-score-fill.red    { background: #ef4444; }
-        .sub-score-detail { font-size: 11px; color: #aaa; margin-top: 6px; }
+        .sub-score-detail { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 
         /* ── Summary Stats Row ─────────────────────────────────────────────── */
         .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
         .stat-pill {
-            background: #fff;
+            background: var(--surface);
             border-radius: 8px;
             padding: 12px 18px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+            box-shadow: 0 1px 3px var(--shadow);
             display: flex;
             flex-direction: column;
             gap: 2px;
             min-width: 120px;
         }
-        .stat-pill .s-label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; }
-        .stat-pill .s-value { font-size: 22px; font-weight: 700; color: #222; }
+        .stat-pill .s-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-pill .s-value { font-size: 22px; font-weight: 700; color: var(--text); }
         .stat-pill .s-value.green  { color: #16a34a; }
         .stat-pill .s-value.yellow { color: #d97706; }
         .stat-pill .s-value.red    { color: #dc2626; }
@@ -242,10 +267,10 @@
         /* ── Queue Cards ───────────────────────────────────────────────────── */
         .queue-grid { display: flex; flex-wrap: wrap; gap: 14px; }
         .queue-card {
-            background: #fff;
+            background: var(--surface);
             border-radius: 10px;
             padding: 16px 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow: 0 1px 3px var(--shadow);
             min-width: 200px;
             flex: 1 1 220px;
             max-width: 300px;
@@ -350,6 +375,113 @@
         .burnout-badge.elevated { background: #fef9c3; color: #92400e; }
         .burnout-badge.high     { background: #fee2e2; color: #b91c1c; }
 
+        /* ── Agent Ops Tab ─────────────────────────────────────────────────── */
+        .ao-fairness-row {
+            display: flex;
+            gap: 16px;
+            align-items: stretch;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+        }
+        .ao-gini-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 18px 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            min-width: 220px;
+            flex: 0 0 240px;
+        }
+        .ao-gini-label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .ao-gini-value { font-size: 40px; font-weight: 900; line-height: 1; margin-bottom: 10px; }
+        .ao-gini-value.fair     { color: #16a34a; }
+        .ao-gini-value.moderate { color: #d97706; }
+        .ao-gini-value.uneven   { color: #dc2626; }
+        .ao-gini-bar-track { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+        .ao-gini-bar-fill  { height: 100%; border-radius: 4px; transition: width 0.5s; }
+        .ao-gini-bar-fill.fair     { background: #22c55e; }
+        .ao-gini-bar-fill.moderate { background: #f59e0b; }
+        .ao-gini-bar-fill.uneven   { background: #ef4444; }
+        .ao-gini-status { font-size: 13px; font-weight: 600; }
+        .ao-gini-status.fair     { color: #16a34a; }
+        .ao-gini-status.moderate { color: #d97706; }
+        .ao-gini-status.uneven   { color: #dc2626; }
+
+        .ao-table-wrap {
+            overflow-x: auto;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .ao-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .ao-table thead th {
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 700;
+            color: #777;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .ao-table thead th:hover { color: #333; background: #fafafa; }
+        .ao-table tbody td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #f3f3f3;
+            color: #333;
+            vertical-align: middle;
+        }
+        .ao-table tbody tr:last-child td { border-bottom: none; }
+        .ao-table tbody tr:hover td { background: #fafafe; }
+        .ao-table tbody tr.ao-off-shift td { opacity: 0.45; }
+        .sort-icon { font-size: 10px; color: #bbb; margin-left: 2px; }
+        .sort-icon.asc::after  { content: ' ▲'; }
+        .sort-icon.desc::after { content: ' ▼'; }
+        .ao-util-bar-wrap { min-width: 120px; }
+        .ao-status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 700;
+        }
+        .ao-status-badge.in_session       { background: #dcfce7; color: #15803d; }
+        .ao-status-badge.between_sessions { background: #fef9c3; color: #92400e; }
+        .ao-status-badge.idle             { background: #fee2e2; color: #b91c1c; }
+        .ao-status-badge.on_break         { background: #ede9fe; color: #5b21b6; }
+        .ao-status-badge.off_shift        { background: #f3f4f6; color: #6b7280; }
+
+        .ao-rec-list { display: flex; flex-direction: column; gap: 10px; }
+        .ao-rec-card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 14px 18px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+            border-left: 4px solid #f59e0b;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .ao-rec-arrow { font-size: 20px; color: #999; }
+        .ao-rec-agent { font-weight: 700; font-size: 14px; }
+        .ao-rec-detail { font-size: 12px; color: #888; margin-top: 2px; }
+        .ao-rec-badge {
+            background: #fef9c3;
+            color: #92400e;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
         /* ── Alerts Feed ───────────────────────────────────────────────────── */
         .alerts-controls {
             display: flex;
@@ -416,6 +548,80 @@
         }
         .ack-btn:hover { background: #f0f2f5; }
 
+        /* ── SLA Risk Cards ────────────────────────────────────────────────── */
+        .sla-grid { display: flex; flex-wrap: wrap; gap: 16px; }
+        .sla-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            min-width: 200px;
+            flex: 1 1 220px;
+            max-width: 280px;
+            border-top: 4px solid #ccc;
+        }
+        .sla-card.risk-low      { border-top-color: #22c55e; }
+        .sla-card.risk-medium   { border-top-color: #f59e0b; }
+        .sla-card.risk-high     { border-top-color: #f97316; }
+        .sla-card.risk-critical { border-top-color: #ef4444; animation: pulse-card 2s infinite; }
+
+        .sla-pkg-name  { font-size: 13px; font-weight: 700; color: #333; margin-bottom: 12px; }
+        .sla-gauge-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .sla-gauge-num {
+            font-size: 42px;
+            font-weight: 900;
+            line-height: 1;
+            min-width: 60px;
+        }
+        .sla-gauge-num.low      { color: #16a34a; }
+        .sla-gauge-num.medium   { color: #d97706; }
+        .sla-gauge-num.high     { color: #ea580c; }
+        .sla-gauge-num.critical { color: #dc2626; }
+
+        .sla-gauge-label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 0.4px; }
+        .sla-gauge-bar-wrap { flex: 1; }
+        .sla-gauge-bar { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
+        .sla-gauge-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+        .sla-gauge-fill.low      { background: #22c55e; }
+        .sla-gauge-fill.medium   { background: #f59e0b; }
+        .sla-gauge-fill.high     { background: #f97316; }
+        .sla-gauge-fill.critical { background: #ef4444; }
+
+        .sla-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .sla-metric-label { font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.4px; }
+        .sla-metric-value { font-size: 15px; font-weight: 700; color: #222; }
+        .sla-metric-value.good    { color: #16a34a; }
+        .sla-metric-value.warning { color: #d97706; }
+        .sla-metric-value.danger  { color: #dc2626; }
+
+        .risk-level-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .risk-level-badge.low      { background: #dcfce7; color: #15803d; }
+        .risk-level-badge.medium   { background: #fef9c3; color: #92400e; }
+        .risk-level-badge.high     { background: #ffedd5; color: #9a3412; }
+        .risk-level-badge.critical { background: #fee2e2; color: #b91c1c; }
+
+        /* ── SLA Projection Chart ──────────────────────────────────────────── */
+        .chart-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+        }
+        .chart-card h3 { margin: 0 0 16px 0; font-size: 14px; font-weight: 700; color: #444; text-transform: uppercase; letter-spacing: 0.5px; }
+        .chart-wrap { position: relative; height: 260px; }
+
+        /* ── SLA Summary Row ───────────────────────────────────────────────── */
+        .sla-summary-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+
         .empty-state {
             text-align: center;
             padding: 48px 24px;
@@ -423,6 +629,260 @@
             font-size: 14px;
         }
         .hidden { display: none; }
+
+        /* ── Planning Tab ──────────────────────────────────────────────────── */
+        .plan-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .plan-toolbar label { font-size: 13px; color: #555; font-weight: 600; }
+        .plan-toolbar input[type="date"],
+        .plan-toolbar select {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+            background: #fff;
+            color: #333;
+        }
+        .plan-toolbar button {
+            padding: 7px 16px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #1a1a1a;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .plan-toolbar button:hover { background: #333; }
+
+        /* Heatmap */
+        .heatmap-wrap {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 20px;
+            overflow-x: auto;
+        }
+        .heatmap-grid {
+            display: grid;
+            grid-template-columns: 48px repeat(24, 1fr);
+            gap: 3px;
+            min-width: 700px;
+        }
+        .hm-hour-label {
+            font-size: 9px;
+            color: #aaa;
+            text-align: center;
+            padding-bottom: 4px;
+            white-space: nowrap;
+        }
+        .hm-row-label {
+            font-size: 11px;
+            color: #666;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            padding-right: 6px;
+            white-space: nowrap;
+        }
+        .hm-cell {
+            height: 28px;
+            border-radius: 4px;
+            background: #f0f2f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            color: rgba(0,0,0,0.5);
+            cursor: default;
+            transition: opacity 0.15s;
+        }
+        .hm-cell:hover { opacity: 0.8; }
+
+        /* Forecast cards */
+        .forecast-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+        .forecast-card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 18px 20px;
+            min-width: 200px;
+            flex: 1 1 200px;
+            max-width: 280px;
+        }
+        .fc-pkg  { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .fc-demand { font-size: 36px; font-weight: 900; line-height: 1; color: #1a1a1a; }
+        .fc-unit   { font-size: 12px; color: #999; margin-bottom: 10px; }
+        .fc-band   { font-size: 11px; color: #777; margin-bottom: 8px; }
+        .fc-agents {
+            display: inline-block;
+            background: #f0f2f5;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #333;
+        }
+        .fc-agents.high { background: #fee2e2; color: #b91c1c; }
+        .fc-agents.medium { background: #fef9c3; color: #92400e; }
+
+        /* What-If simulator */
+        .whatif-panel {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 22px 24px;
+        }
+        .whatif-controls {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 20px;
+        }
+        .whatif-field { display: flex; flex-direction: column; gap: 5px; }
+        .whatif-field label { font-size: 11px; font-weight: 700; color: #777; text-transform: uppercase; }
+        .whatif-field select,
+        .whatif-field input[type="number"],
+        .whatif-field input[type="range"] {
+            padding: 7px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+            background: #fff;
+        }
+        .whatif-field input[type="range"] {
+            width: 180px;
+            padding: 4px 0;
+            border: none;
+            cursor: pointer;
+        }
+        .whatif-range-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .whatif-range-val {
+            font-size: 15px;
+            font-weight: 700;
+            min-width: 36px;
+            color: #1a1a1a;
+        }
+        .whatif-run-btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 6px;
+            background: #1a1a1a;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            align-self: flex-end;
+        }
+        .whatif-run-btn:hover { background: #333; }
+
+        .whatif-results { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; }
+        .wi-result-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 14px 16px;
+            min-width: 180px;
+            flex: 1 1 180px;
+            max-width: 240px;
+            border-left: 4px solid #ccc;
+        }
+        .wi-result-card.risk-low      { border-left-color: #22c55e; }
+        .wi-result-card.risk-medium   { border-left-color: #f59e0b; }
+        .wi-result-card.risk-high     { border-left-color: #ef4444; }
+        .wi-result-card.risk-critical { border-left-color: #991b1b; }
+        .wi-pkg   { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+        .wi-demand { font-size: 26px; font-weight: 900; color: #1a1a1a; line-height: 1; }
+        .wi-sub    { font-size: 11px; color: #999; margin-bottom: 8px; }
+        .wi-rows   { display: flex; flex-direction: column; gap: 4px; }
+        .wi-row    { display: flex; justify-content: space-between; font-size: 12px; }
+        .wi-label  { color: #777; }
+        .wi-value  { font-weight: 700; color: #333; }
+        .wi-value.gap-bad  { color: #dc2626; }
+        .wi-value.gap-ok   { color: #16a34a; }
+        .wi-rec    { font-size: 11px; color: #555; margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee; }
+
+        /* ── Dark mode overrides for hardcoded colors ──────────────────────── */
+        [data-theme="dark"] .queue-card .qc-name,
+        [data-theme="dark"] .sla-pkg-name { color: var(--text); }
+
+        [data-theme="dark"] .queue-card .qc-label,
+        [data-theme="dark"] .queue-card .qc-meta,
+        [data-theme="dark"] .ac-status-text,
+        [data-theme="dark"] .util-bar-label,
+        [data-theme="dark"] .sla-gauge-label,
+        [data-theme="dark"] .sla-metric-label,
+        [data-theme="dark"] .fc-pkg,
+        [data-theme="dark"] .fc-unit,
+        [data-theme="dark"] .fc-band,
+        [data-theme="dark"] .ao-rec-arrow,
+        [data-theme="dark"] .ao-rec-detail,
+        [data-theme="dark"] .alert-meta,
+        [data-theme="dark"] .whatif-field label,
+        [data-theme="dark"] .wi-pkg,
+        [data-theme="dark"] .wi-sub,
+        [data-theme="dark"] .wi-label,
+        [data-theme="dark"] .growth-indicator.flat,
+        [data-theme="dark"] .ao-gini-label { color: var(--text-muted); }
+
+        [data-theme="dark"] .ac-detail,
+        [data-theme="dark"] .plan-toolbar label,
+        [data-theme="dark"] .wi-rec { color: var(--text-2); }
+
+        [data-theme="dark"] .ac-detail strong,
+        [data-theme="dark"] .sla-metric-value,
+        [data-theme="dark"] .wi-value { color: var(--text); }
+
+        [data-theme="dark"] .ao-table thead th { color: var(--text-muted); background: var(--surface-alt); }
+        [data-theme="dark"] .ao-table thead th:hover { color: var(--text); background: var(--surface-alt); }
+        [data-theme="dark"] .ao-table tbody tr td { color: var(--text-2); }
+        [data-theme="dark"] .ao-table tbody tr:hover td { background: var(--surface-alt); }
+
+        [data-theme="dark"] .chart-card h3 { color: var(--text-2); }
+
+        [data-theme="dark"] .chart-card,
+        [data-theme="dark"] .ao-fairness-card,
+        [data-theme="dark"] .ao-rec-card,
+        [data-theme="dark"] .ao-table-wrap,
+        [data-theme="dark"] .forecast-card,
+        [data-theme="dark"] .whatif-panel,
+        [data-theme="dark"] .whatif-result,
+        [data-theme="dark"] .wi-result-card,
+        [data-theme="dark"] .agent-card,
+        [data-theme="dark"] .sla-pkg-card,
+        [data-theme="dark"] select,
+        [data-theme="dark"] input[type="range"] + .whatif-val { background: var(--surface); color: var(--text); border-color: var(--border); }
+
+        [data-theme="dark"] select,
+        [data-theme="dark"] input[type="number"] { background: var(--surface-alt); color: var(--text); border-color: var(--border); }
+
+        [data-theme="dark"] .wi-rec { border-top-color: var(--border-light); }
+
+        /* ── Dark mode toggle button ───────────────────────────────────────── */
+        #dm-toggle {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-2);
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-left: 8px;
+            transition: background 0.15s;
+        }
+        #dm-toggle:hover { background: var(--surface-alt); }
     </style>
 </head>
 <body>
@@ -449,7 +909,10 @@
                 <a href="/settings.html">Settings</a>
             </nav>
         </div>
-        <button class="logout-btn" onclick="logout()">Logout</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <button id="dm-toggle" onclick="toggleDarkMode()" title="Toggle dark mode">🌙</button>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
     </div>
 
     <!-- KPI Strip -->
@@ -461,6 +924,10 @@
         <div class="kpi-pill" onclick="showTab('live-ops')">
             <span class="kpi-label">Queue</span>
             <span class="kpi-value" id="kpi-queue">—</span>
+        </div>
+        <div class="kpi-pill" onclick="showTab('sla-engine')">
+            <span class="kpi-label">SLA Risk</span>
+            <span class="kpi-value" id="kpi-sla-risk">—</span>
         </div>
         <div class="kpi-pill" onclick="showTab('live-ops')">
             <span class="kpi-label">Agents On</span>
@@ -480,9 +947,12 @@
 <!-- ── Tab Nav ────────────────────────────────────────────────────────────── -->
 <div class="tab-nav">
     <button class="tab-btn active" onclick="showTab('live-ops')">Live Ops</button>
+    <button class="tab-btn" onclick="showTab('sla-engine')">SLA Engine</button>
     <button class="tab-btn" onclick="showTab('alerts')">
         Alerts <span class="tab-badge hidden" id="alert-count-badge">0</span>
     </button>
+    <button class="tab-btn" onclick="showTab('agent-ops')">Agent Ops</button>
+    <button class="tab-btn" onclick="showTab('planning')">Planning</button>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -552,6 +1022,49 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- Tab: SLA ENGINE                                                         -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-sla-engine" class="tab-content">
+
+    <!-- Summary pills -->
+    <div class="sla-summary-row" id="sla-summary-row">
+        <div class="stat-pill">
+            <span class="s-label">Worst Risk</span>
+            <span class="s-value" id="sla-worst-risk">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Packages at Risk</span>
+            <span class="s-value" id="sla-packages-at-risk">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Avg Projected SLA</span>
+            <span class="s-value" id="sla-avg-projected">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Last Computed</span>
+            <span class="s-value" id="sla-last-computed" style="font-size:14px">—</span>
+        </div>
+    </div>
+
+    <!-- Risk Cards Grid -->
+    <div class="section">
+        <div class="section-title">Risk Score by Package</div>
+        <div class="sla-grid" id="sla-risk-grid">
+            <div class="empty-state">Waiting for SLA engine first run…</div>
+        </div>
+    </div>
+
+    <!-- Projection Chart -->
+    <div class="chart-card">
+        <h3>Projected SLA % by Package</h3>
+        <div class="chart-wrap">
+            <canvas id="sla-projection-chart"></canvas>
+        </div>
+    </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- Tab: ALERTS                                                             -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <div id="tab-alerts" class="tab-content">
@@ -567,11 +1080,208 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- Tab: AGENT OPS                                                           -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-agent-ops" class="tab-content">
+
+    <!-- Fairness Summary Row -->
+    <div class="ao-fairness-row">
+        <div class="ao-gini-card">
+            <div class="ao-gini-label">Workload Fairness (Gini)</div>
+            <div class="ao-gini-value" id="ao-gini-value">—</div>
+            <div class="ao-gini-bar-track">
+                <div class="ao-gini-bar-fill" id="ao-gini-bar" style="width:0%"></div>
+            </div>
+            <div class="ao-gini-status" id="ao-gini-status">—</div>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Overloaded</span>
+            <span class="s-value" id="ao-overloaded-count" style="color:#dc2626">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Underloaded</span>
+            <span class="s-value" id="ao-underloaded-count" style="color:#16a34a">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Effective Cap/hr</span>
+            <span class="s-value" id="ao-cap-per-hour">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Avg Complexity</span>
+            <span class="s-value" id="ao-avg-complexity">—</span>
+        </div>
+    </div>
+
+    <!-- Agent Ops Table -->
+    <div class="section">
+        <div class="section-title">Agent Workload Table</div>
+        <div class="ao-table-wrap">
+            <table class="ao-table">
+                <thead>
+                    <tr>
+                        <th onclick="sortAoTable('name')">Agent <span class="sort-icon" id="si-name"></span></th>
+                        <th onclick="sortAoTable('status')">Status <span class="sort-icon" id="si-status"></span></th>
+                        <th onclick="sortAoTable('pending')">Pending <span class="sort-icon" id="si-pending"></span></th>
+                        <th onclick="sortAoTable('util')" style="min-width:180px">Utilization <span class="sort-icon" id="si-util"></span></th>
+                        <th onclick="sortAoTable('completion')">Done % <span class="sort-icon" id="si-completion"></span></th>
+                        <th onclick="sortAoTable('pace')">Pace/hr <span class="sort-icon" id="si-pace"></span></th>
+                        <th onclick="sortAoTable('shift_end')">Shift End <span class="sort-icon" id="si-shift_end"></span></th>
+                    </tr>
+                </thead>
+                <tbody id="ao-table-body">
+                    <tr><td colspan="7" class="empty-state">Loading agent data…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Reassignment Recommendations -->
+    <div class="section">
+        <div class="section-title">Reassignment Recommendations</div>
+        <div id="ao-recommendations">
+            <div class="empty-state">No reassignments needed — workload is balanced.</div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- Tab: PLANNING                                                            -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-planning" class="tab-content">
+
+    <!-- Hourly Heatmap -->
+    <div class="section">
+        <div class="section-title">Hourly Demand Heatmap</div>
+        <div class="plan-toolbar">
+            <label for="hm-date-input">Date</label>
+            <input type="date" id="hm-date-input">
+            <button onclick="fetchHeatmap()">Load</button>
+        </div>
+        <div class="heatmap-wrap">
+            <div id="heatmap-grid" class="heatmap-grid">
+                <div class="empty-state" style="grid-column:1/-1">Loading heatmap…</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Weekly Forecast -->
+    <div class="section">
+        <div class="section-title">Weekly Demand Forecast
+            <span style="font-size:11px;font-weight:400;color:#999;margin-left:8px">EMA model · updated nightly</span>
+        </div>
+        <div class="plan-toolbar">
+            <label for="fc-day-select">Day of week</label>
+            <select id="fc-day-select">
+                <option value="0">Sunday</option>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+            </select>
+            <button onclick="fetchForecast()">Load</button>
+        </div>
+        <div id="forecast-note" class="empty-state hidden"></div>
+        <div class="forecast-grid" id="forecast-grid">
+            <div class="empty-state">Select a day and press Load.</div>
+        </div>
+    </div>
+
+    <!-- What-If Simulator -->
+    <div class="section">
+        <div class="section-title">What-If Simulator</div>
+        <div class="whatif-panel">
+            <div class="whatif-controls">
+                <div class="whatif-field">
+                    <label>Scenario</label>
+                    <select id="wi-scenario" onchange="updateWiControls()">
+                        <option value="demand_spike">Demand Spike</option>
+                        <option value="agent_absent">Agent Absent</option>
+                        <option value="package_growth">Package Growth</option>
+                    </select>
+                </div>
+
+                <!-- demand_spike controls -->
+                <div class="whatif-field" id="wi-ctrl-spike">
+                    <label>Demand increase (%)</label>
+                    <div class="whatif-range-row">
+                        <input type="range" id="wi-spike-pct" min="10" max="200" value="50"
+                               oninput="document.getElementById('wi-spike-val').textContent = this.value + '%'">
+                        <span class="whatif-range-val" id="wi-spike-val">50%</span>
+                    </div>
+                </div>
+
+                <!-- agent_absent controls -->
+                <div class="whatif-field hidden" id="wi-ctrl-absent">
+                    <label>Agents absent</label>
+                    <input type="number" id="wi-absent-count" value="1" min="1" max="20" style="width:80px">
+                </div>
+
+                <!-- package_growth controls -->
+                <div class="whatif-field hidden" id="wi-ctrl-pkg">
+                    <label>Package</label>
+                    <select id="wi-pkg-select">
+                        <option>Fit Solo Pro</option>
+                        <option>Fit Fam Pro</option>
+                        <option selected>Fit Solo</option>
+                        <option>Fit Duo</option>
+                        <option>Fit Fam</option>
+                    </select>
+                </div>
+                <div class="whatif-field hidden" id="wi-ctrl-pkg-pct">
+                    <label>Growth (%)</label>
+                    <div class="whatif-range-row">
+                        <input type="range" id="wi-pkg-pct" min="5" max="150" value="30"
+                               oninput="document.getElementById('wi-pkg-val').textContent = this.value + '%'">
+                        <span class="whatif-range-val" id="wi-pkg-val">30%</span>
+                    </div>
+                </div>
+
+                <button class="whatif-run-btn" onclick="runSimulation()">Run Simulation</button>
+            </div>
+
+            <div id="wi-loading" class="empty-state hidden">Running simulation…</div>
+            <div id="wi-results" class="whatif-results"></div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
 <script>
 'use strict';
 
 const token = localStorage.getItem('adminToken');
 if (!token) { location.href = '/'; }
+
+// ── Dark mode ──────────────────────────────────────────────────────────────
+(function initDarkMode() {
+    const saved = localStorage.getItem('opsDarkMode');
+    if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    updateDmToggle();
+})();
+
+function toggleDarkMode() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('opsDarkMode', 'light');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('opsDarkMode', 'dark');
+    }
+    updateDmToggle();
+}
+
+function updateDmToggle() {
+    const btn = document.getElementById('dm-toggle');
+    if (!btn) return;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    btn.textContent = isDark ? '☀️' : '🌙';
+    btn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+}
 
 const API = (path, opts = {}) => fetch(path, {
     ...opts,
@@ -585,12 +1295,17 @@ const state = {
     workload:  { agents: [], max_chats_per_hour: 6 },
     alerts:    [],
     health:    null,
+    slaScores: [],       // latest per-package SLA risk scores
+    fairness:  null,     // /api/agent-fairness response
+    reassign:  [],       // /api/reassign-recommendations
     sseOnline: false,
     lastUpdatedAt: null,
 };
 
 let alertFilter = 'all';
 let alertBarDismissed = false;
+let aoSortKey = 'util';
+let aoSortDir = -1;  // -1 = descending
 
 // ── SSE ────────────────────────────────────────────────────────────────────
 let es;
@@ -603,6 +1318,18 @@ function connectSSE() {
         state.lastUpdatedAt = new Date();
         renderQueueGrid();
         renderStatsRow();
+        renderKpi();
+        // Refresh Agent Ops table pending counts without re-fetching fairness
+        if (document.getElementById('tab-agent-ops').classList.contains('active')) {
+            fetchFairness();
+            fetchReassign();
+        }
+    });
+
+    es.addEventListener('sla_risk', e => {
+        state.slaScores = JSON.parse(e.data);
+        state.lastUpdatedAt = new Date();
+        renderSlaTab();
         renderKpi();
     });
 
@@ -669,6 +1396,36 @@ async function fetchHealth() {
     } catch { /* non-critical */ }
 }
 
+async function fetchSlaRisk() {
+    try {
+        const r = await API('/api/sla-risk');
+        if (!r.ok) return;
+        const d = await r.json();
+        state.slaScores = d.scores || [];
+        renderSlaTab();
+        renderKpi();
+    } catch { /* non-critical */ }
+}
+
+async function fetchFairness() {
+    try {
+        const r = await API('/api/agent-fairness');
+        if (!r.ok) return;
+        state.fairness = await r.json();
+        renderAgentOpsTab();
+    } catch { /* non-critical */ }
+}
+
+async function fetchReassign() {
+    try {
+        const r = await API('/api/reassign-recommendations');
+        if (!r.ok) return;
+        const d = await r.json();
+        state.reassign = d.recommendations || [];
+        renderRecommendations();
+    } catch { /* non-critical */ }
+}
+
 // ── Rendering: KPI Strip ───────────────────────────────────────────────────
 function renderKpi() {
     const total  = state.queue.global_total;
@@ -686,6 +1443,19 @@ function renderKpi() {
     const $queue = document.getElementById('kpi-queue');
     $queue.textContent = total;
     $queue.className = 'kpi-value ' + (total > 30 ? 'red' : total > 15 ? 'yellow' : 'green');
+
+    // SLA Risk pill — worst risk level across live packages
+    const liveSla = state.slaScores.filter(s => s.package_name !== 'Fit Express');
+    const $slaRisk = document.getElementById('kpi-sla-risk');
+    if (liveSla.length > 0) {
+        const worstScore = Math.max(...liveSla.map(s => s.risk_score ?? 0));
+        const lvl = worstScore >= 75 ? 'critical' : worstScore >= 50 ? 'high' : worstScore >= 25 ? 'medium' : 'low';
+        $slaRisk.textContent = lvl.toUpperCase();
+        $slaRisk.className = 'kpi-value ' + (lvl === 'low' ? 'green' : lvl === 'medium' ? 'yellow' : 'red');
+    } else {
+        $slaRisk.textContent = '—';
+        $slaRisk.className = 'kpi-value';
+    }
 
     document.getElementById('kpi-agents').textContent = `${onShift}/${total_a}`;
     document.getElementById('kpi-alerts').textContent = unacked || '0';
@@ -738,6 +1508,147 @@ function renderExecSummary() {
             <div class="sub-score-detail">${c.detail}</div>
         </div>`;
     }).join('');
+}
+
+// ── Rendering: SLA Engine Tab ──────────────────────────────────────────────
+let slaProjectionChart = null;
+
+function renderSlaTab() {
+    const scores = state.slaScores;
+    if (scores.length === 0) return;
+
+    // Summary pills
+    const live = scores.filter(s => s.package_name !== 'Fit Express');
+    const worstScore = Math.max(...live.map(s => s.risk_score ?? 0));
+    const worstLevel = worstScore >= 75 ? 'critical' : worstScore >= 50 ? 'high' : worstScore >= 25 ? 'medium' : 'low';
+    const atRisk     = live.filter(s => (s.risk_score ?? 0) >= 50).length;
+    const avgProj    = live.length > 0
+        ? Math.round(live.reduce((s, x) => s + (x.projected_sla_eod ?? 100), 0) / live.length)
+        : 100;
+
+    const $worst = document.getElementById('sla-worst-risk');
+    $worst.textContent = worstLevel.toUpperCase();
+    $worst.className   = `s-value ${worstLevel === 'low' ? 'green' : worstLevel === 'medium' ? 'yellow' : 'red'}`;
+
+    document.getElementById('sla-packages-at-risk').textContent = `${atRisk} / ${live.length}`;
+    const $avg = document.getElementById('sla-avg-projected');
+    $avg.textContent = `${avgProj}%`;
+    $avg.className   = `s-value ${avgProj >= 90 ? 'green' : avgProj >= 75 ? 'yellow' : 'red'}`;
+    document.getElementById('sla-last-computed').textContent = fmtRelTime(scores[0]?.computed_at ?? null) || '—';
+
+    // Risk cards
+    const PKG_ORDER = ['Fit Solo Pro', 'Fit Fam Pro', 'Fit Solo', 'Fit Duo', 'Fit Fam', 'Fit Express'];
+    const ordered = PKG_ORDER.map(n => scores.find(s => s.package_name === n)).filter(Boolean);
+
+    document.getElementById('sla-risk-grid').innerHTML = ordered.map(s => {
+        const lvl   = s.risk_level ?? 'low';
+        const score = s.risk_score ?? 0;
+        const proj  = s.projected_sla_eod ?? 100;
+        const cur   = s.current_sla_rate  ?? 100;
+        const projColor = proj >= 90 ? 'good' : proj >= 75 ? 'warning' : 'danger';
+        const curColor  = cur  >= 90 ? 'good' : cur  >= 75 ? 'warning' : 'danger';
+        const isScheduled = s.package_name === 'Fit Express';
+
+        return `
+        <div class="sla-card risk-${lvl}">
+            <div class="sla-pkg-name">${esc(s.package_name)}</div>
+            <span class="risk-level-badge ${lvl}">${lvl}</span>
+            <div class="sla-gauge-row">
+                <div>
+                    <div class="sla-gauge-label">Risk Score</div>
+                    <div class="sla-gauge-num ${lvl}">${score}</div>
+                </div>
+                <div class="sla-gauge-bar-wrap">
+                    <div class="sla-gauge-bar">
+                        <div class="sla-gauge-fill ${lvl}" style="width:${score}%"></div>
+                    </div>
+                </div>
+            </div>
+            ${isScheduled ? '<div style="font-size:11px;color:#aaa">Scheduled workload — SLA risk N/A</div>' : `
+            <div class="sla-metrics">
+                <div class="sla-metric">
+                    <div class="sla-metric-label">Current SLA</div>
+                    <div class="sla-metric-value ${curColor}">${cur}%</div>
+                </div>
+                <div class="sla-metric">
+                    <div class="sla-metric-label">Projected EOD</div>
+                    <div class="sla-metric-value ${projColor}">${proj}%</div>
+                </div>
+                <div class="sla-metric">
+                    <div class="sla-metric-label">Queue</div>
+                    <div class="sla-metric-value">${s.current_queue ?? 0}</div>
+                </div>
+                <div class="sla-metric">
+                    <div class="sla-metric-label">Agents Needed</div>
+                    <div class="sla-metric-value ${s.agents_needed > 0 ? 'danger' : 'good'}">${s.agents_needed ?? 0}</div>
+                </div>
+            </div>`}
+        </div>`;
+    }).join('');
+
+    // Projection bar chart
+    const chartScores = ordered.filter(s => s.package_name !== 'Fit Express');
+    const labels      = chartScores.map(s => s.package_name);
+    const projData    = chartScores.map(s => s.projected_sla_eod ?? 100);
+    const curData     = chartScores.map(s => s.current_sla_rate  ?? 100);
+    const barColors   = projData.map(v => v >= 90 ? '#22c55e' : v >= 75 ? '#f59e0b' : '#ef4444');
+
+    const ctx = document.getElementById('sla-projection-chart').getContext('2d');
+    if (slaProjectionChart) slaProjectionChart.destroy();
+    slaProjectionChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Current SLA %',
+                    data: curData,
+                    backgroundColor: 'rgba(99,102,241,0.25)',
+                    borderColor: '#6366f1',
+                    borderWidth: 2,
+                    borderRadius: 4,
+                },
+                {
+                    label: 'Projected EOD SLA %',
+                    data: projData,
+                    backgroundColor: barColors,
+                    borderColor: barColors,
+                    borderWidth: 0,
+                    borderRadius: 4,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    min: 0, max: 100,
+                    ticks: { callback: v => v + '%' },
+                    grid: { color: '#f0f0f0' },
+                },
+                x: { grid: { display: false } },
+            },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` },
+                },
+                annotation: {
+                    annotations: {
+                        target: {
+                            type: 'line',
+                            yMin: 95, yMax: 95,
+                            borderColor: '#dc2626',
+                            borderWidth: 1,
+                            borderDash: [4, 4],
+                            label: { content: 'Target 95%', display: true, position: 'end', font: { size: 10 } },
+                        },
+                    },
+                },
+            },
+        },
+    });
 }
 
 // ── Rendering: Stats Row ───────────────────────────────────────────────────
@@ -932,6 +1843,368 @@ function setAlertFilter(f) {
     renderAlertsList();
 }
 
+// ── Rendering: Agent Ops Tab ───────────────────────────────────────────────
+function giniClass(g) {
+    return g < 0.2 ? 'fair' : g < 0.4 ? 'moderate' : 'uneven';
+}
+
+function giniLabel(g) {
+    if (g < 0.2) return 'Excellent — workload evenly distributed';
+    if (g < 0.4) return 'Moderate inequality — review overloaded agents';
+    return 'High inequality — reassignments recommended';
+}
+
+function renderAgentOpsTab() {
+    const f = state.fairness;
+    if (!f) return;
+
+    const cls = giniClass(f.gini_coefficient);
+    const el  = document.getElementById('ao-gini-value');
+    el.textContent  = f.gini_coefficient.toFixed(3);
+    el.className    = `ao-gini-value ${cls}`;
+    const bar = document.getElementById('ao-gini-bar');
+    bar.style.width = `${Math.min(f.gini_coefficient * 100, 100)}%`;
+    bar.className   = `ao-gini-bar-fill ${cls}`;
+    const st  = document.getElementById('ao-gini-status');
+    st.textContent = giniLabel(f.gini_coefficient);
+    st.className   = `ao-gini-status ${cls}`;
+
+    const onShiftAgents = f.agents.filter(a => a.on_shift);
+    document.getElementById('ao-overloaded-count').textContent =
+        onShiftAgents.filter(a => a.weighted_util_ratio > 0.8).length;
+    document.getElementById('ao-underloaded-count').textContent =
+        onShiftAgents.filter(a => a.weighted_util_ratio < 0.4).length;
+    document.getElementById('ao-cap-per-hour').textContent =
+        f.weighted_cap_per_hour != null ? f.weighted_cap_per_hour.toFixed(1) : '—';
+    document.getElementById('ao-avg-complexity').textContent =
+        f.avg_complexity != null ? f.avg_complexity.toFixed(2) + '×' : '—';
+
+    renderAoTable();
+}
+
+function renderAoTable() {
+    const tbody = document.getElementById('ao-table-body');
+    if (!state.fairness) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Loading…</td></tr>';
+        return;
+    }
+
+    // Merge data from state.workload + state.agents + state.fairness
+    const rows = state.fairness.agents.map(fa => {
+        const agent = state.agents.find(a => a.id === fa.agent_id) || {};
+        const wl    = state.workload.agents?.find(w => w.agent_id === fa.agent_id) || {};
+        return {
+            agent_id:    fa.agent_id,
+            name:        fa.agent_name,
+            status:      agent.status || (fa.on_shift ? 'between_sessions' : 'off_shift'),
+            on_shift:    fa.on_shift,
+            pending:     fa.pending,
+            util:        fa.weighted_util_ratio,
+            completion:  wl.completion_pct ?? null,
+            pace:        wl.required_pace  ?? null,
+            shift_end:   wl.shift_end_time ?? '—',
+        };
+    });
+
+    // Sort
+    rows.sort((a, b) => {
+        let va = a[aoSortKey], vb = b[aoSortKey];
+        if (typeof va === 'string') return aoSortDir * va.localeCompare(vb ?? '');
+        return aoSortDir * ((va ?? -1) - (vb ?? -1));
+    });
+
+    // Update sort icons
+    ['name','status','pending','util','completion','pace','shift_end'].forEach(k => {
+        const el = document.getElementById(`si-${k}`);
+        if (!el) return;
+        el.className = k === aoSortKey ? `sort-icon ${aoSortDir === -1 ? 'desc' : 'asc'}` : 'sort-icon';
+    });
+
+    tbody.innerHTML = rows.map(r => {
+        const statusLabels = {
+            in_session: 'In Session', between_sessions: 'Between', idle: 'Idle',
+            on_break: 'On Break', off_shift: 'Off Shift',
+        };
+        const pct    = Math.min(Math.round(r.util * 100), 100);
+        const cls    = utilClass(r.util);
+        const offRow = !r.on_shift ? ' ao-off-shift' : '';
+
+        return `<tr class="${offRow}">
+            <td><strong>${esc(r.name)}</strong></td>
+            <td><span class="ao-status-badge ${r.status}">${statusLabels[r.status] ?? r.status}</span></td>
+            <td>${r.pending}</td>
+            <td class="ao-util-bar-wrap">
+                <div class="util-bar-label" style="font-size:11px;color:#aaa;display:flex;justify-content:space-between;margin-bottom:3px">
+                    <span>${pct}%</span><span>${r.util > 1 ? 'Overloaded' : r.util > 0.7 ? 'Busy' : 'Healthy'}</span>
+                </div>
+                <div class="util-bar-track"><div class="util-bar-fill ${cls}" style="width:${pct}%"></div></div>
+            </td>
+            <td>${r.completion != null ? r.completion + '%' : '—'}</td>
+            <td>${r.pace != null ? r.pace.toFixed(1) : '—'}</td>
+            <td>${esc(r.shift_end)}</td>
+        </tr>`;
+    }).join('');
+}
+
+function renderRecommendations() {
+    const el = document.getElementById('ao-recommendations');
+    if (!state.reassign || state.reassign.length === 0) {
+        el.innerHTML = '<div class="empty-state">No reassignments needed — workload is balanced.</div>';
+        return;
+    }
+    el.innerHTML = `<div class="ao-rec-list">${state.reassign.map(r => `
+    <div class="ao-rec-card">
+        <div>
+            <div class="ao-rec-agent">${esc(r.from_agent_name)}</div>
+            <div class="ao-rec-detail">${r.from_ratio_pct}% utilization</div>
+        </div>
+        <div class="ao-rec-arrow">→</div>
+        <div>
+            <div class="ao-rec-agent">${esc(r.to_agent_name)}</div>
+            <div class="ao-rec-detail">${r.to_ratio_pct}% utilization</div>
+        </div>
+        <div class="ao-rec-badge">Move ${r.chats_to_move} chat${r.chats_to_move > 1 ? 's' : ''}</div>
+    </div>`).join('')}</div>`;
+}
+
+function sortAoTable(key) {
+    if (aoSortKey === key) {
+        aoSortDir *= -1;
+    } else {
+        aoSortKey = key;
+        aoSortDir = key === 'name' ? 1 : -1;
+    }
+    renderAoTable();
+}
+
+// ── Planning Tab ───────────────────────────────────────────────────────────
+
+function planningLocalDate() {
+    // Returns today's date in server local time (UTC+2) as YYYY-MM-DD.
+    return new Date(Date.now() + 2 * 3600000).toISOString().slice(0, 10);
+}
+
+function initPlanningDefaults() {
+    const input = document.getElementById('hm-date-input');
+    if (input && !input.value) input.value = planningLocalDate();
+
+    const sel = document.getElementById('fc-day-select');
+    if (sel) {
+        const localDay = new Date(Date.now() + 2 * 3600000).getUTCDay();
+        sel.value = String(localDay);
+    }
+}
+
+// ── Heatmap ────────────────────────────────────────────────────────────────
+
+async function fetchHeatmap() {
+    const date = document.getElementById('hm-date-input').value || planningLocalDate();
+    const grid = document.getElementById('heatmap-grid');
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1">Loading…</div>';
+
+    try {
+        const token = localStorage.getItem('adminToken');
+        const res   = await fetch(`/api/hourly-heatmap?date=${encodeURIComponent(date)}`,
+            { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error(await res.text());
+        const { hours, maxIncoming } = await res.json();
+        renderHeatmap(hours, maxIncoming);
+    } catch (err) {
+        grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;color:#dc2626">Failed: ${esc(err.message)}</div>`;
+    }
+}
+
+function heatmapColor(ratio) {
+    if (ratio <= 0)   return '#f0f2f5';
+    if (ratio < 0.25) return '#dbeafe';
+    if (ratio < 0.50) return '#93c5fd';
+    if (ratio < 0.75) return '#3b82f6';
+    return '#1d4ed8';
+}
+
+function renderHeatmap(hours, maxIncoming) {
+    const grid = document.getElementById('heatmap-grid');
+    const DAY_HOURS = ['00','01','02','03','04','05','06','07','08','09','10','11',
+                       '12','13','14','15','16','17','18','19','20','21','22','23'];
+
+    let html = '';
+    // Empty corner + hour labels
+    html += '<div></div>';
+    DAY_HOURS.forEach(h => {
+        html += `<div class="hm-hour-label">${h}</div>`;
+    });
+
+    // Incoming row
+    html += '<div class="hm-row-label">Incoming</div>';
+    hours.forEach(h => {
+        const ratio  = h.incoming / maxIncoming;
+        const bg     = heatmapColor(ratio);
+        const label  = h.incoming > 0 ? h.incoming : '';
+        const title  = `${h.label}: ${h.incoming} incoming, ${h.handled} handled`;
+        html += `<div class="hm-cell" style="background:${bg};color:${ratio>0.5?'#fff':'rgba(0,0,0,0.5)'}"
+                      title="${esc(title)}">${label}</div>`;
+    });
+
+    // Handled row
+    const maxHandled = Math.max(...hours.map(h => h.handled), 1);
+    html += '<div class="hm-row-label">Handled</div>';
+    hours.forEach(h => {
+        const ratio = h.handled / maxHandled;
+        const bg    = ratio > 0 ? `rgba(34,197,94,${0.2 + ratio * 0.7})` : '#f0f2f5';
+        const label = h.handled > 0 ? h.handled : '';
+        html += `<div class="hm-cell" style="background:${bg}" title="${h.label}: ${h.handled} handled">${label}</div>`;
+    });
+
+    // Breaches row
+    const anyBreach = hours.some(h => h.breaches > 0);
+    if (anyBreach) {
+        const maxBreaches = Math.max(...hours.map(h => h.breaches), 1);
+        html += '<div class="hm-row-label">Breaches</div>';
+        hours.forEach(h => {
+            const ratio = h.breaches / maxBreaches;
+            const bg    = ratio > 0 ? `rgba(239,68,68,${0.2 + ratio * 0.7})` : '#f0f2f5';
+            const label = h.breaches > 0 ? h.breaches : '';
+            html += `<div class="hm-cell" style="background:${bg}" title="${h.label}: ${h.breaches} breaches">${label}</div>`;
+        });
+    }
+
+    grid.innerHTML = html;
+}
+
+// ── Forecast ───────────────────────────────────────────────────────────────
+
+async function fetchForecast() {
+    const weekday = document.getElementById('fc-day-select').value;
+    const grid    = document.getElementById('forecast-grid');
+    const note    = document.getElementById('forecast-note');
+    grid.innerHTML = '<div class="empty-state">Loading…</div>';
+    note.classList.add('hidden');
+
+    try {
+        const token = localStorage.getItem('adminToken');
+        const res   = await fetch(`/api/forecast?weekday=${weekday}`,
+            { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+
+        if (data.note) {
+            note.textContent = data.note;
+            note.classList.remove('hidden');
+        }
+        renderForecast(data.models || []);
+    } catch (err) {
+        grid.innerHTML = `<div class="empty-state" style="color:#dc2626">Failed: ${esc(err.message)}</div>`;
+    }
+}
+
+function renderForecast(models) {
+    const grid = document.getElementById('forecast-grid');
+    if (!models.length) {
+        grid.innerHTML = '<div class="empty-state">No forecast data for this day yet.</div>';
+        return;
+    }
+    grid.innerHTML = models.map(m => {
+        const demand  = Math.round(m.forecast_demand ?? 0);
+        const lo      = Math.round(m.confidence_low  ?? 0);
+        const hi      = Math.round(m.confidence_high ?? 0);
+        const agents  = m.agents_required ?? 0;
+        const cls     = agents >= 8 ? 'high' : agents >= 5 ? 'medium' : '';
+        return `
+        <div class="forecast-card">
+            <div class="fc-pkg">${esc(m.package_name)}</div>
+            <div class="fc-demand">${demand}</div>
+            <div class="fc-unit">chats forecast</div>
+            <div class="fc-band">Range: ${lo} – ${hi}</div>
+            <span class="fc-agents ${cls}">${agents} agent${agents !== 1 ? 's' : ''} needed</span>
+        </div>`;
+    }).join('');
+}
+
+// ── What-If Simulator ──────────────────────────────────────────────────────
+
+function updateWiControls() {
+    const scenario = document.getElementById('wi-scenario').value;
+    document.getElementById('wi-ctrl-spike').classList.toggle('hidden', scenario !== 'demand_spike');
+    document.getElementById('wi-ctrl-absent').classList.toggle('hidden', scenario !== 'agent_absent');
+    document.getElementById('wi-ctrl-pkg').classList.toggle('hidden', scenario !== 'package_growth');
+    document.getElementById('wi-ctrl-pkg-pct').classList.toggle('hidden', scenario !== 'package_growth');
+}
+
+async function runSimulation() {
+    const scenario = document.getElementById('wi-scenario').value;
+    const loading  = document.getElementById('wi-loading');
+    const results  = document.getElementById('wi-results');
+    loading.classList.remove('hidden');
+    results.innerHTML = '';
+
+    let params = {};
+    if (scenario === 'demand_spike') {
+        params.spikePercent = parseInt(document.getElementById('wi-spike-pct').value);
+    } else if (scenario === 'agent_absent') {
+        params.agentsAbsent = parseInt(document.getElementById('wi-absent-count').value);
+    } else if (scenario === 'package_growth') {
+        params.packageName = document.getElementById('wi-pkg-select').value;
+        params.growthPct   = parseInt(document.getElementById('wi-pkg-pct').value);
+    }
+
+    try {
+        const token = localStorage.getItem('adminToken');
+        const res   = await fetch('/api/what-if/simulate', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body:    JSON.stringify({ scenario, params }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        renderWiResults(data.results || []);
+    } catch (err) {
+        results.innerHTML = `<div class="empty-state" style="color:#dc2626">Failed: ${esc(err.message)}</div>`;
+    } finally {
+        loading.classList.add('hidden');
+    }
+}
+
+function renderWiResults(items) {
+    const el = document.getElementById('wi-results');
+    if (!items.length) {
+        el.innerHTML = '<div class="empty-state">No forecast data available for today. Run the forecasting service first.</div>';
+        return;
+    }
+    el.innerHTML = items.map(r => {
+        const gapCls  = r.agent_gap > 0 ? 'gap-bad' : 'gap-ok';
+        const gapText = r.agent_gap > 0 ? `+${r.agent_gap} needed` : r.agent_gap < 0 ? `${r.agent_gap} surplus` : 'balanced';
+        return `
+        <div class="wi-result-card risk-${esc(r.sla_risk)}">
+            <div class="wi-pkg">${esc(r.package_name)}</div>
+            <div class="wi-demand">${r.forecast_demand}</div>
+            <div class="wi-sub">chats forecast</div>
+            <div class="wi-rows">
+                <div class="wi-row">
+                    <span class="wi-label">Agents required</span>
+                    <span class="wi-value">${r.required_agents}</span>
+                </div>
+                <div class="wi-row">
+                    <span class="wi-label">Effective agents</span>
+                    <span class="wi-value">${r.effective_agents}</span>
+                </div>
+                <div class="wi-row">
+                    <span class="wi-label">Gap</span>
+                    <span class="wi-value ${gapCls}">${gapText}</span>
+                </div>
+                <div class="wi-row">
+                    <span class="wi-label">Utilization</span>
+                    <span class="wi-value">${r.utilization}%</span>
+                </div>
+                <div class="wi-row">
+                    <span class="wi-label">SLA risk</span>
+                    <span class="wi-value">${r.sla_risk}</span>
+                </div>
+            </div>
+            <div class="wi-rec">${esc(r.recommendation)}</div>
+        </div>`;
+    }).join('');
+}
+
 // ── Tab Switching ──────────────────────────────────────────────────────────
 function showTab(id) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -940,7 +2213,10 @@ function showTab(id) {
     document.querySelectorAll('.tab-btn').forEach(btn => {
         if (btn.getAttribute('onclick') === `showTab('${id}')`) btn.classList.add('active');
     });
-    if (id === 'alerts') { alertBarDismissed = false; renderAlertBar(); }
+    if (id === 'alerts')     { alertBarDismissed = false; renderAlertBar(); }
+    if (id === 'sla-engine') { renderSlaTab(); }
+    if (id === 'agent-ops')  { fetchFairness(); fetchReassign(); }
+    if (id === 'planning')   { initPlanningDefaults(); fetchHeatmap(); fetchForecast(); }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1006,15 +2282,20 @@ setInterval(renderKpi, 15_000);
 
 // ── Init ───────────────────────────────────────────────────────────────────
 (async () => {
-    await Promise.all([fetchAgents(), fetchAlerts(), fetchHealth()]);
+    await Promise.all([fetchAgents(), fetchAlerts(), fetchHealth(), fetchSlaRisk()]);
     fetchWorkload(); // slower call — don't block init
+    fetchFairness();
+    fetchReassign();
     connectSSE();
 
     // Periodic polling
-    setInterval(fetchAgents,  30_000);
-    setInterval(fetchWorkload, 60_000);
+    setInterval(fetchAgents,   30_000);
+    setInterval(fetchWorkload,  60_000);
     setInterval(fetchAlerts,   30_000);
     setInterval(fetchHealth,   60_000);
+    setInterval(fetchSlaRisk, 15 * 60_000); // matches engine interval
+    setInterval(fetchFairness, 60_000);
+    setInterval(fetchReassign, 60_000);
 })();
 </script>
 </body>

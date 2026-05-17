@@ -216,38 +216,36 @@ module.exports = function (sql, requireAgent, getCachedSettings) {
             const shiftStartedAt = shift[0].shift_started_at;
             const shiftDurationSeconds = shift[0].shift_duration_seconds;
 
-            // Check for active break (compute duration server-side)
-            const activeBreak = await sql`
-                SELECT id, started_at,
-                    ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)))::int AS current_break_seconds
-                FROM shift_breaks
-                WHERE shift_id = ${shiftId} AND ended_at IS NULL
-                LIMIT 1
-            `;
+            // Fetch settings, break state, completed breaks, and completed sessions in parallel
+            const [settings, activeBreakResult, breakDataResult, completedSessionsResult] = await Promise.all([
+                getCachedSettings(),
+                sql`
+                    SELECT id, started_at,
+                        ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)))::int AS current_break_seconds
+                    FROM shift_breaks
+                    WHERE shift_id = ${shiftId} AND ended_at IS NULL
+                    LIMIT 1
+                `,
+                sql`
+                    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))), 0)::int AS total_seconds
+                    FROM shift_breaks
+                    WHERE shift_id = ${shiftId} AND ended_at IS NOT NULL
+                `,
+                sql`
+                    SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM (
+                        LEAST(ended_at, NOW()) - GREATEST(clicked_at, ${shiftStartedAt})
+                    )))), 0)::int AS total_seconds
+                    FROM sessions
+                    WHERE agent_id = ${agentId}
+                      AND clicked_at < NOW()
+                      AND ended_at > ${shiftStartedAt}
+                      AND ended_at IS NOT NULL
+                `,
+            ]);
 
-            // Total completed break seconds for this shift
-            const breakData = await sql`
-                SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at))), 0)::int AS total_seconds
-                FROM shift_breaks
-                WHERE shift_id = ${shiftId} AND ended_at IS NOT NULL
-            `;
-            const completedBreakSeconds = Number(breakData[0].total_seconds);
-
-            // Total completed session seconds within this shift (clamped to shift boundaries)
-            const completedSessions = await sql`
-                SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM (
-                    LEAST(ended_at, NOW()) - GREATEST(clicked_at, ${shiftStartedAt})
-                )))), 0)::int AS total_seconds
-                FROM sessions
-                WHERE agent_id = ${agentId}
-                  AND clicked_at < NOW()
-                  AND ended_at > ${shiftStartedAt}
-                  AND ended_at IS NOT NULL
-            `;
-            const completedActiveSeconds = Number(completedSessions[0].total_seconds);
-
-            // Fetch activity threshold (idle_warning_minutes) from cached settings
-            const settings = await getCachedSettings();
+            const activeBreak = activeBreakResult;
+            const completedBreakSeconds = Number(breakDataResult[0].total_seconds);
+            const completedActiveSeconds = Number(completedSessionsResult[0].total_seconds);
             const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
 
             // Gap-based idle: SQL CTE version of the algorithm in utils/shift-utils.js computeGapIdle()

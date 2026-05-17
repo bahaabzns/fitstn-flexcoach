@@ -121,6 +121,7 @@ const activityEventRoutes = require("./routes/activity-events")(sql, requireAgen
 const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin);
 const demandReportRoutes = require("./routes/demand-report")(sql, supabase, ensureSupabaseAuth, requireAdmin);
 const alertRoutes         = require("./routes/alerts")(sql, requireAdmin);
+const planningRoutes      = require("./routes/planning")(sql, requireAdmin);
 const { computeGapIdle } = require("./utils/shift-utils");
 
 // SSE — broadcast is exported so QueueEngine (and future engines) can push updates
@@ -131,6 +132,16 @@ const { broadcast } = sseModule;
 // Queue engine — instantiated here so it can be started after DB init
 const QueueEngine = require("./services/queue-engine");
 const queueEngine = new QueueEngine({ sql, supabase, ensureSupabaseAuth, broadcast });
+
+// SLA + Alert engines — depend on queueEngine, started after DB is ready
+const SlaEngine          = require("./services/sla-engine");
+const AlertEngine        = require("./services/alert-engine");
+const { ForecastingService } = require("./services/forecasting");
+const ExpressScheduler   = require("./services/express-scheduler");
+const slaEngine          = new SlaEngine({ sql, queueEngine, broadcast });
+const alertEngine        = new AlertEngine({ sql, queueEngine, slaEngine, broadcast });
+const forecastingService = new ForecastingService({ sql });
+const expressScheduler   = new ExpressScheduler({ sql, supabase, ensureSupabaseAuth, broadcast });
 
 // CORS: restrict to known clients (dev + production + FlexCoach host page for content scripts)
 const ALLOWED_ORIGINS = [
@@ -165,6 +176,7 @@ app.use("/api", activityEventRoutes);
 app.use("/api/staff-assignator", staffAssignatorRoutes);
 app.use("/api", demandReportRoutes);
 app.use("/api", alertRoutes);
+app.use("/api", planningRoutes);
 app.use("/api", sseRoutes);
 
 // Returns the current in-memory queue state built by QueueEngine
@@ -213,8 +225,11 @@ app.get("/api/ops-health", requireAdmin, async (req, res) => {
             ? Math.max(0, Math.round(100 - (overloaded / byAgent.length) * 100))
             : 100;
 
-        // SLA health placeholder — Phase 3 will replace with projected_sla_eod
-        const slaHealth = 100;
+        // Use real SLA data from SlaEngine if available
+        const slaScores = slaEngine.getScores().filter(s => s.projected_sla_eod != null);
+        const slaHealth = slaScores.length > 0
+            ? Math.round(Math.min(...slaScores.map(s => s.projected_sla_eod)))
+            : 100;
 
         const opsScore = Math.round(
             slaHealth      * 0.40 +
@@ -236,6 +251,26 @@ app.get("/api/ops-health", requireAdmin, async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ error: "Failed to compute ops health", details: err.message });
+    }
+});
+
+// Current SLA risk scores — returns in-memory scores from SlaEngine (instant),
+// falls back to DB latest if engine hasn't run yet this session
+app.get("/api/sla-risk", requireAdmin, async (req, res) => {
+    try {
+        const live = slaEngine.getScores();
+        if (live.length > 0) {
+            return res.json({ scores: live, source: "live" });
+        }
+        // Fallback: latest row per package from DB
+        const rows = await sql`
+            SELECT DISTINCT ON (package_name) *
+            FROM sla_risk_scores
+            ORDER BY package_name, computed_at DESC
+        `;
+        res.json({ scores: rows, source: "db" });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch SLA risk scores", details: err.message });
     }
 });
 
@@ -777,6 +812,21 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
         const avgMinutesPerChat = parseInt(avgMinRow?.value) || 10;
         const { slaCutoffTime, cutH, cutM, isPastCutoff } = await getSlaCutoffStatus();
 
+        // Load package capacity config for weighted utilization formula
+        const capacityConfig = await sql`
+            SELECT complexity_weight, avg_handling_minutes, max_concurrent_chats
+            FROM agent_capacity_config
+            WHERE is_scheduled_workload = FALSE
+        `;
+        const totalCfgWeight = capacityConfig.reduce((s, r) => s + parseFloat(r.complexity_weight), 0);
+        const weightedCapPerHour = totalCfgWeight > 0
+            ? capacityConfig.reduce((s, r) => {
+                const cap = (60 / parseFloat(r.avg_handling_minutes)) * parseFloat(r.max_concurrent_chats);
+                return s + cap * parseFloat(r.complexity_weight) / totalCfgWeight;
+              }, 0)
+            : 6;
+        const avgComplexity = totalCfgWeight > 0 ? totalCfgWeight / capacityConfig.length : 1.0;
+
         const agents = await sql`
             SELECT id, name, fitstn_id, shift_end_time
             FROM agents
@@ -913,6 +963,9 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
                 else if (workloadRatio > 1) status = 'overloaded';
                 else if (workloadRatio > 0.7) status = 'busy';
 
+                const weightedPace  = requiredPace * avgComplexity;
+                const weightedRatio = weightedCapPerHour > 0 ? weightedPace / weightedCapPerHour : 0;
+
                 return {
                     agent_id: agent.id,
                     agent_name: agent.name,
@@ -927,6 +980,7 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
                     completion_pct: completionPct,
                     required_pace: Math.round(requiredPace * 10) / 10,
                     workload_ratio: Math.round(workloadRatio * 100) / 100,
+                    weighted_util_ratio: Math.round(weightedRatio * 100) / 100,
                     hours_remaining: Math.round(hoursLeft * 10) / 10,
                     shift_end_time: shiftEnd,
                     status,
@@ -949,6 +1003,142 @@ app.get("/api/agent-workload", requireAdmin, async (req, res) => {
     } catch (err) {
         console.error("GET /api/agent-workload error:", err.message);
         res.status(500).json({ error: "Failed to fetch agent workload", details: err.message });
+    }
+});
+
+// ── Agent Fairness ────────────────────────────────────────────────────────
+// Computes weighted utilization per agent using package complexity weights
+// and concurrency from agent_capacity_config, then derives a Gini coefficient.
+app.get("/api/agent-fairness", requireAdmin, async (req, res) => {
+    try {
+        const capacityConfig = await sql`
+            SELECT complexity_weight, avg_handling_minutes, max_concurrent_chats
+            FROM agent_capacity_config
+            WHERE is_scheduled_workload = FALSE
+        `;
+
+        // Weighted effective throughput: sum over packages of (cap_i × weight_i) / total_weight
+        const totalWeight = capacityConfig.reduce((s, r) => s + parseFloat(r.complexity_weight), 0);
+        const weightedCapPerHour = totalWeight > 0
+            ? capacityConfig.reduce((s, r) => {
+                const cap = (60 / parseFloat(r.avg_handling_minutes)) * parseFloat(r.max_concurrent_chats);
+                return s + cap * parseFloat(r.complexity_weight) / totalWeight;
+              }, 0)
+            : 6;
+        const avgComplexity = totalWeight > 0 ? totalWeight / capacityConfig.length : 1.0;
+
+        const queueState   = queueEngine.getState();
+        const byAgentQueue = Object.fromEntries((queueState.byAgent || []).map(a => [a.agent_id, a]));
+
+        const now    = new Date();
+        const agents = await sql`
+            SELECT a.id, a.name,
+                   (EXISTS(SELECT 1 FROM shifts s WHERE s.agent_id = a.id AND s.shift_ended_at IS NULL)) AS on_shift,
+                   COALESCE(a.shift_end_time, '19:00') AS shift_end_time
+            FROM agents a
+            WHERE a.is_active = TRUE
+        `;
+
+        const scored = agents.map(a => {
+            const q         = byAgentQueue[a.id];
+            const pending   = q?.pending_count ?? 0;
+            const [seh, sem] = a.shift_end_time.split(':').map(Number);
+            const shiftEnd  = new Date(now);
+            shiftEnd.setHours(seh, sem, 0, 0);
+            const hoursLeft = Math.max(0, (shiftEnd - now) / 3_600_000);
+            const pace      = hoursLeft > 0 ? pending / hoursLeft : pending;
+            const ratio     = weightedCapPerHour > 0 ? (pace * avgComplexity) / weightedCapPerHour : 0;
+            return {
+                agent_id:           a.id,
+                agent_name:         a.name,
+                on_shift:           a.on_shift,
+                pending,
+                hours_left:         Math.round(hoursLeft * 10) / 10,
+                weighted_util_ratio: Math.round(ratio * 100) / 100,
+            };
+        });
+
+        const onShiftRatios = scored.filter(a => a.on_shift).map(a => a.weighted_util_ratio);
+        const gini = computeGini(onShiftRatios);
+
+        res.json({
+            agents: scored,
+            gini_coefficient:    Math.round(gini * 1000) / 1000,
+            weighted_cap_per_hour: Math.round(weightedCapPerHour * 10) / 10,
+            avg_complexity:      Math.round(avgComplexity * 100) / 100,
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to compute agent fairness", details: err.message });
+    }
+});
+
+function computeGini(values) {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const n      = sorted.length;
+    const mean   = sorted.reduce((s, v) => s + v, 0) / n;
+    if (mean === 0) return 0;
+    let sumDiff = 0;
+    for (let i = 0; i < n; i++)
+        for (let j = 0; j < n; j++)
+            sumDiff += Math.abs(sorted[i] - sorted[j]);
+    return sumDiff / (2 * n * n * mean);
+}
+
+// ── Reassignment Recommendations ─────────────────────────────────────────
+app.get("/api/reassign-recommendations", requireAdmin, async (req, res) => {
+    try {
+        const [avgMinRow] = await sql`SELECT value FROM settings WHERE key = 'avg_minutes_per_chat'`;
+        const maxChatsPerHour = 60 / (parseInt(avgMinRow?.value) || 10);
+
+        const queueState   = queueEngine.getState();
+        const byAgentQueue = Object.fromEntries((queueState.byAgent || []).map(a => [a.agent_id, a]));
+        const now          = new Date();
+
+        const agents = await sql`
+            SELECT a.id, a.name,
+                   (EXISTS(SELECT 1 FROM shifts s WHERE s.agent_id = a.id AND s.shift_ended_at IS NULL)) AS on_shift,
+                   COALESCE(a.shift_end_time, '19:00') AS shift_end_time
+            FROM agents a
+            WHERE a.is_active = TRUE
+        `;
+
+        const scored = agents
+            .filter(a => a.on_shift)
+            .map(a => {
+                const q          = byAgentQueue[a.id];
+                const pending    = q?.pending_count ?? 0;
+                const [seh, sem] = a.shift_end_time.split(':').map(Number);
+                const shiftEnd   = new Date(now);
+                shiftEnd.setHours(seh, sem, 0, 0);
+                const hoursLeft  = Math.max(0, (shiftEnd - now) / 3_600_000);
+                const pace       = hoursLeft > 0 ? pending / hoursLeft : pending;
+                const ratio      = maxChatsPerHour > 0 ? pace / maxChatsPerHour : 0;
+                return { agent_id: a.id, agent_name: a.name, pending, hours_left: hoursLeft, ratio };
+            });
+
+        const overloaded  = scored.filter(a => a.ratio > 0.8).sort((a, b) => b.ratio - a.ratio);
+        const underloaded = scored.filter(a => a.ratio < 0.4).sort((a, b) => a.ratio - b.ratio);
+
+        const recommendations = [];
+        for (const from of overloaded) {
+            const to = underloaded.find(u => u.agent_id !== from.agent_id);
+            if (!to) break;
+            const chatsToMove = Math.max(1, Math.ceil((from.ratio - 0.6) * from.hours_left * maxChatsPerHour));
+            recommendations.push({
+                from_agent_id:   from.agent_id,
+                from_agent_name: from.agent_name,
+                to_agent_id:     to.agent_id,
+                to_agent_name:   to.agent_name,
+                chats_to_move:   chatsToMove,
+                from_ratio_pct:  Math.round(from.ratio * 100),
+                to_ratio_pct:    Math.round(to.ratio * 100),
+            });
+        }
+
+        res.json({ recommendations, computed_at: new Date().toISOString() });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to compute reassignment recommendations", details: err.message });
     }
 });
 
@@ -1785,6 +1975,18 @@ app.listen(PORT, async () => {
 
         // Queue engine — polls Supabase every 60 s and broadcasts via SSE
         queueEngine.start();
+
+        // SLA engine — computes per-package risk scores every 15 min
+        slaEngine.start();
+
+        // Alert engine — evaluates rules every 5 min, writes to operational_alerts
+        alertEngine.start();
+
+        // Forecasting service — seeds models immediately then reruns nightly at midnight
+        forecastingService.start();
+
+        // Express scheduler — snapshots Fit Express rooms daily at 11:00 local
+        expressScheduler.start();
 
         console.log("Database schema ready.");
     } catch (err) {

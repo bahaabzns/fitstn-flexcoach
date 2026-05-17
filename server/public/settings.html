@@ -122,6 +122,28 @@
         </div>
     </div>
 
+    <div class="form-section" style="margin-top: 24px; max-width: 720px;">
+        <h2>Package Capacity Configuration</h2>
+        <p style="font-size: 13px; color: #555; margin: 0 0 16px;">
+            Controls how workload, utilization, and staffing requirements are calculated per package.
+        </p>
+        <table id="capacity-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+                <tr style="background: #f5f5f5;">
+                    <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid #ddd;">Package</th>
+                    <th style="text-align: center; padding: 8px 10px; border-bottom: 1px solid #ddd;" title="Multiplier on base handling time. 1.5 = 50% harder.">Complexity<br>Weight</th>
+                    <th style="text-align: center; padding: 8px 10px; border-bottom: 1px solid #ddd;" title="Average minutes an agent spends on one chat for this package.">Avg Handling<br>(min)</th>
+                    <th style="text-align: center; padding: 8px 10px; border-bottom: 1px solid #ddd;" title="Max chats agent should handle concurrently for this package.">Max Concurrent<br>Chats</th>
+                    <th style="text-align: center; padding: 8px 10px; border-bottom: 1px solid #ddd;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="capacity-tbody">
+                <tr><td colspan="5" style="padding: 16px; color: #999; text-align: center;">Loading…</td></tr>
+            </tbody>
+        </table>
+        <div id="capacity-msg" style="font-size: 13px; margin-top: 10px; display: none;"></div>
+    </div>
+
     <div class="form-section" style="margin-top: 24px; border: 2px solid #dc3545;">
         <h2 style="color: #dc3545;">Danger Zone</h2>
         <p style="font-size: 13px; color: #555; margin: 0 0 12px;">
@@ -223,6 +245,93 @@
         });
 
         loadSettings();
+        loadCapacityConfig();
+
+        async function loadCapacityConfig() {
+            try {
+                const res  = await authFetch('/api/capacity-config');
+                const data = await res.json();
+                renderCapacityTable(data.configs || []);
+            } catch (err) {
+                document.getElementById('capacity-tbody').innerHTML =
+                    '<tr><td colspan="5" style="padding:16px;color:#dc3545;text-align:center;">Failed to load capacity config.</td></tr>';
+            }
+        }
+
+        function renderCapacityTable(configs) {
+            const tbody = document.getElementById('capacity-tbody');
+            if (!configs.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="padding:16px;color:#999;text-align:center;">No config data.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = configs.map(cfg => `
+                <tr data-pkg="${escHtml(cfg.package_name)}" style="border-bottom: 1px solid #eee;">
+                    <td style="padding:8px 10px; font-weight:500;">${escHtml(cfg.package_name)}</td>
+                    <td style="text-align:center; padding:8px 4px;">
+                        <input type="number" class="cap-input" data-field="complexity_weight"
+                               value="${cfg.complexity_weight}" min="0.1" max="5" step="0.1"
+                               style="width:64px; padding:5px; border:1px solid #ddd; border-radius:4px; text-align:center; font-size:13px;"
+                               ${cfg.is_scheduled_workload ? 'disabled title="Scheduled workload — not used in live calculations"' : ''}>
+                    </td>
+                    <td style="text-align:center; padding:8px 4px;">
+                        <input type="number" class="cap-input" data-field="avg_handling_minutes"
+                               value="${cfg.avg_handling_minutes}" min="1" max="120" step="1"
+                               style="width:64px; padding:5px; border:1px solid #ddd; border-radius:4px; text-align:center; font-size:13px;">
+                    </td>
+                    <td style="text-align:center; padding:8px 4px;">
+                        <input type="number" class="cap-input" data-field="max_concurrent_chats"
+                               value="${cfg.max_concurrent_chats}" min="1" max="20" step="1"
+                               style="width:64px; padding:5px; border:1px solid #ddd; border-radius:4px; text-align:center; font-size:13px;">
+                    </td>
+                    <td style="text-align:center; padding:8px 4px;">
+                        <button class="btn btn-primary" onclick="saveCapacityRow(this)"
+                                style="padding:5px 12px; font-size:12px;">Save</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        async function saveCapacityRow(btn) {
+            const row = btn.closest('tr');
+            const pkg = row.dataset.pkg;
+            const inputs = row.querySelectorAll('.cap-input');
+            const body = {};
+            inputs.forEach(inp => { body[inp.dataset.field] = inp.value; });
+
+            const msgEl = document.getElementById('capacity-msg');
+            btn.disabled = true;
+            btn.textContent = '…';
+            msgEl.style.display = 'none';
+
+            try {
+                const res  = await authFetch('/api/capacity-config/' + encodeURIComponent(pkg), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    msgEl.textContent = `${pkg} saved.`;
+                    msgEl.style.color = '#28a745';
+                    msgEl.style.display = 'block';
+                    setTimeout(() => { msgEl.style.display = 'none'; }, 2500);
+                } else {
+                    msgEl.textContent = data.error || 'Save failed.';
+                    msgEl.style.color = '#dc3545';
+                    msgEl.style.display = 'block';
+                }
+            } catch (err) {
+                msgEl.textContent = 'Save failed — check your connection.';
+                msgEl.style.color = '#dc3545';
+                msgEl.style.display = 'block';
+            }
+            btn.disabled = false;
+            btn.textContent = 'Save';
+        }
 
         const resetBtn = document.getElementById('reset-db-btn');
         const resetConfirmField = document.getElementById('reset-confirm-field');
