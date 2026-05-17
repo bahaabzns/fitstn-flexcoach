@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ops Center</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background: #f0f2f5;
+            padding-top: 0;
+        }
+
+        /* ── Alert Bar ─────────────────────────────────────────────────────── */
+        #alert-bar {
+            position: sticky;
+            top: 0;
+            z-index: 200;
+            background: #dc3545;
+            color: #fff;
+            padding: 10px 24px;
+            display: none;
+            align-items: center;
+            gap: 16px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        #alert-bar.show { display: flex; }
+        #alert-bar-text { flex: 1; }
+        #alert-bar-dismiss {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: #fff;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        #alert-bar-dismiss:hover { background: rgba(255,255,255,0.35); }
+
+        /* ── Page Header / Nav ─────────────────────────────────────────────── */
+        .page-header {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .page-header.has-alert-bar { top: 40px; }
+        .header-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            height: 56px;
+        }
+        .header-left { display: flex; align-items: center; gap: 24px; }
+        .header-title { font-size: 18px; font-weight: bold; color: #1a1a1a; white-space: nowrap; }
+        nav { display: flex; gap: 4px; }
+        nav a {
+            text-decoration: none;
+            color: #555;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: background 0.15s;
+        }
+        nav a:hover { background: #f0f2f5; color: #333; }
+        nav a.active { background: #333; color: #fff; }
+        .logout-btn {
+            padding: 6px 14px;
+            background: #dc3545;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        /* ── KPI Strip ─────────────────────────────────────────────────────── */
+        .kpi-strip {
+            background: #1a1a2e;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 0;
+            padding: 0 24px;
+            height: 48px;
+            font-size: 13px;
+            flex-wrap: wrap;
+        }
+        .kpi-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 20px;
+            border-right: 1px solid rgba(255,255,255,0.1);
+            height: 100%;
+            cursor: pointer;
+        }
+        .kpi-pill:last-of-type { border-right: none; }
+        .kpi-pill:hover { background: rgba(255,255,255,0.07); }
+        .kpi-label { color: rgba(255,255,255,0.55); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .kpi-value { font-weight: bold; font-size: 16px; }
+        .kpi-value.green  { color: #4ade80; }
+        .kpi-value.yellow { color: #fbbf24; }
+        .kpi-value.red    { color: #f87171; }
+        .kpi-updated {
+            margin-left: auto;
+            color: rgba(255,255,255,0.45);
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-left: 20px;
+        }
+        .live-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #4ade80;
+            animation: blink 2s infinite;
+        }
+        .live-dot.offline { background: #f87171; animation: none; }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+
+        /* ── Tab Nav ───────────────────────────────────────────────────────── */
+        .tab-nav {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            gap: 0;
+            padding: 0 24px;
+        }
+        .tab-btn {
+            padding: 12px 20px;
+            border: none;
+            background: none;
+            font-size: 14px;
+            font-weight: 500;
+            color: #777;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .tab-btn:hover { color: #333; }
+        .tab-btn.active { color: #1a1a1a; border-bottom-color: #1a1a1a; }
+        .tab-badge {
+            display: inline-block;
+            background: #dc3545;
+            color: #fff;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 1px 6px;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+        /* ── Tab Content ───────────────────────────────────────────────────── */
+        .tab-content { display: none; padding: 24px; }
+        .tab-content.active { display: block; }
+
+        /* ── Section ───────────────────────────────────────────────────────── */
+        .section { margin-bottom: 28px; }
+        .section-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0 0 14px 0;
+        }
+
+        /* ── Exec Summary ──────────────────────────────────────────────────── */
+        .exec-row { display: flex; gap: 16px; flex-wrap: wrap; }
+        .health-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            flex: 0 0 auto;
+            min-width: 200px;
+            text-align: center;
+        }
+        .health-score-num {
+            font-size: 56px;
+            font-weight: 900;
+            line-height: 1;
+            margin: 8px 0 4px;
+        }
+        .health-score-num.green  { color: #16a34a; }
+        .health-score-num.yellow { color: #d97706; }
+        .health-score-num.red    { color: #dc2626; }
+        .health-score-label { font-size: 12px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .health-score-status { font-size: 13px; font-weight: 600; margin-top: 4px; }
+        .health-score-status.green  { color: #16a34a; }
+        .health-score-status.yellow { color: #d97706; }
+        .health-score-status.red    { color: #dc2626; }
+
+        .sub-scores { flex: 1; display: flex; gap: 14px; flex-wrap: wrap; align-items: stretch; }
+        .sub-score-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            flex: 1 1 160px;
+        }
+        .sub-score-name { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .sub-score-value { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+        .sub-score-bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
+        .sub-score-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+        .sub-score-fill.green  { background: #22c55e; }
+        .sub-score-fill.yellow { background: #f59e0b; }
+        .sub-score-fill.red    { background: #ef4444; }
+        .sub-score-detail { font-size: 11px; color: #aaa; margin-top: 6px; }
+
+        /* ── Summary Stats Row ─────────────────────────────────────────────── */
+        .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+        .stat-pill {
+            background: #fff;
+            border-radius: 8px;
+            padding: 12px 18px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 120px;
+        }
+        .stat-pill .s-label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-pill .s-value { font-size: 22px; font-weight: 700; color: #222; }
+        .stat-pill .s-value.green  { color: #16a34a; }
+        .stat-pill .s-value.yellow { color: #d97706; }
+        .stat-pill .s-value.red    { color: #dc2626; }
+
+        /* ── Queue Cards ───────────────────────────────────────────────────── */
+        .queue-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+        .queue-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            min-width: 200px;
+            flex: 1 1 220px;
+            max-width: 300px;
+            border-left: 4px solid #ccc;
+            position: relative;
+        }
+        .queue-card.sev-green  { border-left-color: #22c55e; }
+        .queue-card.sev-yellow { border-left-color: #f59e0b; }
+        .queue-card.sev-red    { border-left-color: #ef4444; animation: pulse-card 2s infinite; }
+        @keyframes pulse-card {
+            0%, 100% { box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+            50%       { box-shadow: 0 0 12px rgba(239,68,68,0.3); }
+        }
+        .queue-card .qc-name  { font-size: 13px; font-weight: 700; color: #333; margin-bottom: 10px; }
+        .queue-card .qc-count { font-size: 36px; font-weight: 900; line-height: 1; color: #1a1a1a; }
+        .queue-card .qc-label { font-size: 11px; color: #aaa; margin-bottom: 8px; }
+        .queue-card .qc-meta  { display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 10px; }
+        .sev-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .sev-badge.green  { background: #dcfce7; color: #15803d; }
+        .sev-badge.yellow { background: #fef9c3; color: #92400e; }
+        .sev-badge.red    { background: #fee2e2; color: #b91c1c; }
+        .growth-indicator { font-size: 12px; font-weight: 600; }
+        .growth-indicator.up   { color: #dc2626; }
+        .growth-indicator.down { color: #16a34a; }
+        .growth-indicator.flat { color: #888; }
+
+        /* Global queue summary card */
+        .queue-global-card {
+            background: #1a1a2e;
+            color: #fff;
+            border-radius: 10px;
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            min-width: 200px;
+            flex: 0 0 220px;
+        }
+        .queue-global-card .qc-name  { font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .queue-global-card .qc-count { font-size: 48px; font-weight: 900; line-height: 1; }
+        .queue-global-card .qc-label { font-size: 11px; color: rgba(255,255,255,0.4); margin-bottom: 6px; }
+        .queue-global-card .qc-meta  { display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 10px; }
+
+        /* ── Agent Grid ────────────────────────────────────────────────────── */
+        .agent-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+        .agent-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 16px 18px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            min-width: 220px;
+            flex: 1 1 240px;
+            max-width: 320px;
+            border-left: 4px solid #ccc;
+        }
+        .agent-card.s-in_session       { border-left-color: #22c55e; }
+        .agent-card.s-between_sessions { border-left-color: #f59e0b; }
+        .agent-card.s-idle             { border-left-color: #ef4444; animation: pulse-card 2s infinite; }
+        .agent-card.s-on_break         { border-left-color: #6366f1; background: #f5f5ff; }
+        .agent-card.s-off_shift        { border-left-color: #d1d5db; background: #fafafa; opacity: 0.7; }
+
+        .ac-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+        .ac-name { font-size: 15px; font-weight: 700; color: #1a1a1a; }
+        .status-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            margin-top: 4px;
+            flex-shrink: 0;
+        }
+        .status-dot.in_session       { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
+        .status-dot.between_sessions { background: #f59e0b; }
+        .status-dot.idle             { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.2); }
+        .status-dot.on_break         { background: #6366f1; }
+        .status-dot.off_shift        { background: #d1d5db; }
+
+        .ac-status-text { font-size: 12px; color: #777; margin-bottom: 8px; }
+        .ac-detail { font-size: 12px; color: #555; margin: 3px 0; }
+        .ac-detail strong { color: #222; }
+
+        .util-bar-wrap { margin-top: 10px; }
+        .util-bar-label { font-size: 11px; color: #aaa; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .util-bar-track { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
+        .util-bar-fill  { height: 100%; border-radius: 3px; transition: width 0.4s; }
+        .util-bar-fill.healthy     { background: #22c55e; }
+        .util-bar-fill.busy        { background: #f59e0b; }
+        .util-bar-fill.overloaded  { background: #ef4444; }
+
+        .burnout-badge {
+            display: inline-block;
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-top: 6px;
+        }
+        .burnout-badge.safe     { background: #dcfce7; color: #15803d; }
+        .burnout-badge.elevated { background: #fef9c3; color: #92400e; }
+        .burnout-badge.high     { background: #fee2e2; color: #b91c1c; }
+
+        /* ── Alerts Feed ───────────────────────────────────────────────────── */
+        .alerts-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 6px 14px;
+            border: 1px solid #ddd;
+            background: #fff;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #555;
+        }
+        .filter-btn.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+        .alerts-list { display: flex; flex-direction: column; gap: 10px; }
+        .alert-row {
+            background: #fff;
+            border-radius: 8px;
+            padding: 14px 18px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            border-left: 4px solid #ccc;
+        }
+        .alert-row.sev-critical { border-left-color: #ef4444; }
+        .alert-row.sev-warning  { border-left-color: #f59e0b; }
+        .alert-row.sev-info     { border-left-color: #60a5fa; }
+        .alert-row.acked { opacity: 0.5; }
+
+        .alert-sev-badge {
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .alert-sev-badge.critical { background: #fee2e2; color: #b91c1c; }
+        .alert-sev-badge.warning  { background: #fef9c3; color: #92400e; }
+        .alert-sev-badge.info     { background: #dbeafe; color: #1d4ed8; }
+
+        .alert-body { flex: 1; }
+        .alert-title { font-size: 14px; font-weight: 600; color: #1a1a1a; }
+        .alert-text  { font-size: 12px; color: #666; margin-top: 2px; }
+        .alert-meta  { font-size: 11px; color: #aaa; margin-top: 4px; }
+        .ack-btn {
+            padding: 5px 12px;
+            border: 1px solid #ddd;
+            background: #fff;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            color: #444;
+            white-space: nowrap;
+            flex-shrink: 0;
+            align-self: center;
+        }
+        .ack-btn:hover { background: #f0f2f5; }
+
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: #aaa;
+            font-size: 14px;
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<!-- ── Alert Bar ──────────────────────────────────────────────────────────── -->
+<div id="alert-bar">
+    <span id="alert-bar-text"></span>
+    <button id="alert-bar-dismiss" onclick="dismissAlertBar()">Dismiss</button>
+</div>
+
+<!-- ── Page Header ───────────────────────────────────────────────────────── -->
+<div class="page-header" id="page-header">
+    <div class="header-inner">
+        <div class="header-left">
+            <span class="header-title">Ops Center</span>
+            <nav>
+                <a href="/overview.html">Overview</a>
+                <a href="/ops-center.html" class="active">Ops Center</a>
+                <a href="/demand-report.html">Demand Report</a>
+                <a href="/dashboard.html">Dashboard</a>
+                <a href="/agents.html">Agents</a>
+                <a href="/shifts.html">Shifts</a>
+                <a href="/salaries.html">Salaries</a>
+                <a href="/settings.html">Settings</a>
+            </nav>
+        </div>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+
+    <!-- KPI Strip -->
+    <div class="kpi-strip">
+        <div class="kpi-pill" onclick="showTab('live-ops')">
+            <span class="kpi-label">Ops Score</span>
+            <span class="kpi-value" id="kpi-ops-score">—</span>
+        </div>
+        <div class="kpi-pill" onclick="showTab('live-ops')">
+            <span class="kpi-label">Queue</span>
+            <span class="kpi-value" id="kpi-queue">—</span>
+        </div>
+        <div class="kpi-pill" onclick="showTab('live-ops')">
+            <span class="kpi-label">Agents On</span>
+            <span class="kpi-value" id="kpi-agents">—</span>
+        </div>
+        <div class="kpi-pill" onclick="showTab('alerts')">
+            <span class="kpi-label">Alerts</span>
+            <span class="kpi-value" id="kpi-alerts">—</span>
+        </div>
+        <div class="kpi-updated">
+            <span class="live-dot" id="live-dot"></span>
+            <span id="kpi-updated-text">Connecting…</span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Tab Nav ────────────────────────────────────────────────────────────── -->
+<div class="tab-nav">
+    <button class="tab-btn active" onclick="showTab('live-ops')">Live Ops</button>
+    <button class="tab-btn" onclick="showTab('alerts')">
+        Alerts <span class="tab-badge hidden" id="alert-count-badge">0</span>
+    </button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- Tab: LIVE OPS                                                           -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-live-ops" class="tab-content active">
+
+    <!-- Executive Summary -->
+    <div class="section">
+        <div class="section-title">Executive Summary</div>
+        <div class="exec-row">
+            <div class="health-card">
+                <div class="health-score-label">Ops Health</div>
+                <div class="health-score-num" id="exec-score">—</div>
+                <div class="health-score-status" id="exec-status">Loading…</div>
+            </div>
+            <div class="sub-scores" id="sub-scores-grid">
+                <!-- injected -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="stats-row" id="stats-row">
+        <div class="stat-pill">
+            <span class="s-label">Global Queue</span>
+            <span class="s-value" id="stat-queue">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Unassigned</span>
+            <span class="s-value" id="stat-unassigned">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Growth Rate</span>
+            <span class="s-value" id="stat-growth">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Agents On Shift</span>
+            <span class="s-value" id="stat-on-shift">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">In Session</span>
+            <span class="s-value" id="stat-in-session">—</span>
+        </div>
+        <div class="stat-pill">
+            <span class="s-label">Sessions Today</span>
+            <span class="s-value" id="stat-sessions-today">—</span>
+        </div>
+    </div>
+
+    <!-- Queue Monitor -->
+    <div class="section">
+        <div class="section-title">Queue Monitor — Per Agent</div>
+        <div class="queue-grid" id="queue-grid">
+            <div class="empty-state">Waiting for first queue poll…</div>
+        </div>
+    </div>
+
+    <!-- Agent Live Grid -->
+    <div class="section">
+        <div class="section-title">Agent Live Grid</div>
+        <div class="agent-grid" id="agent-grid">
+            <div class="empty-state">Loading agent statuses…</div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- Tab: ALERTS                                                             -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-alerts" class="tab-content">
+    <div class="alerts-controls">
+        <button class="filter-btn active" id="filter-all" onclick="setAlertFilter('all')">All</button>
+        <button class="filter-btn" id="filter-unacked" onclick="setAlertFilter('unacked')">Unacknowledged</button>
+        <button class="filter-btn" id="filter-critical" onclick="setAlertFilter('critical')">Critical</button>
+        <button class="filter-btn" id="filter-warning" onclick="setAlertFilter('warning')">Warning</button>
+    </div>
+    <div class="alerts-list" id="alerts-list">
+        <div class="empty-state">No alerts.</div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+const token = localStorage.getItem('adminToken');
+if (!token) { location.href = '/'; }
+
+const API = (path, opts = {}) => fetch(path, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+});
+
+// ── State ──────────────────────────────────────────────────────────────────
+const state = {
+    queue:     { byAgent: [], unassigned_count: 0, global_total: 0, global_growth_rate: 0, capturedAt: null },
+    agents:    [],
+    workload:  { agents: [], max_chats_per_hour: 6 },
+    alerts:    [],
+    health:    null,
+    sseOnline: false,
+    lastUpdatedAt: null,
+};
+
+let alertFilter = 'all';
+let alertBarDismissed = false;
+
+// ── SSE ────────────────────────────────────────────────────────────────────
+let es;
+function connectSSE() {
+    if (es) es.close();
+    es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`);
+
+    es.addEventListener('queue_update', e => {
+        state.queue = JSON.parse(e.data);
+        state.lastUpdatedAt = new Date();
+        renderQueueGrid();
+        renderStatsRow();
+        renderKpi();
+    });
+
+    es.addEventListener('alert', e => {
+        const a = JSON.parse(e.data);
+        state.alerts.unshift(a);
+        renderAlertBar();
+        renderAlertsList();
+        renderKpi();
+    });
+
+    es.onopen = () => {
+        state.sseOnline = true;
+        renderKpi();
+    };
+    es.onerror = () => {
+        state.sseOnline = false;
+        renderKpi();
+        es.close();
+        setTimeout(connectSSE, 5_000);
+    };
+}
+
+// ── Data Fetching ──────────────────────────────────────────────────────────
+async function fetchAgents() {
+    try {
+        const r = await API('/api/overview');
+        if (!r.ok) return;
+        state.agents = await r.json();
+        renderAgentGrid();
+        renderStatsRow();
+        renderKpi();
+    } catch { /* network error — SSE dot handles status */ }
+}
+
+async function fetchWorkload() {
+    try {
+        const r = await API('/api/agent-workload');
+        if (!r.ok) return;
+        state.workload = await r.json();
+        renderAgentGrid(); // re-render with utilization bars
+    } catch { /* non-critical */ }
+}
+
+async function fetchAlerts() {
+    try {
+        const r = await API('/api/alerts?limit=100');
+        if (!r.ok) return;
+        const d = await r.json();
+        state.alerts = d.alerts || [];
+        renderAlertBar();
+        renderAlertsList();
+        renderKpi();
+    } catch { /* non-critical */ }
+}
+
+async function fetchHealth() {
+    try {
+        const r = await API('/api/ops-health');
+        if (!r.ok) return;
+        state.health = await r.json();
+        renderExecSummary();
+        renderKpi();
+    } catch { /* non-critical */ }
+}
+
+// ── Rendering: KPI Strip ───────────────────────────────────────────────────
+function renderKpi() {
+    const total  = state.queue.global_total;
+    const onShift = state.agents.filter(a => a.status !== 'off_shift').length;
+    const total_a = state.agents.length;
+    const unacked = state.alerts.filter(a => !a.is_acknowledged).length;
+    const opsScore = state.health?.opsScore ?? null;
+
+    const $score = document.getElementById('kpi-ops-score');
+    if (opsScore !== null) {
+        $score.textContent = opsScore;
+        $score.className = 'kpi-value ' + scoreColor(opsScore);
+    }
+
+    const $queue = document.getElementById('kpi-queue');
+    $queue.textContent = total;
+    $queue.className = 'kpi-value ' + (total > 30 ? 'red' : total > 15 ? 'yellow' : 'green');
+
+    document.getElementById('kpi-agents').textContent = `${onShift}/${total_a}`;
+    document.getElementById('kpi-alerts').textContent = unacked || '0';
+
+    const badge = document.getElementById('alert-count-badge');
+    if (unacked > 0) { badge.textContent = unacked; badge.classList.remove('hidden'); }
+    else { badge.classList.add('hidden'); }
+
+    // SSE status + last updated
+    const dot = document.getElementById('live-dot');
+    dot.className = 'live-dot' + (state.sseOnline ? '' : ' offline');
+    const upd = document.getElementById('kpi-updated-text');
+    if (state.lastUpdatedAt) {
+        const sec = Math.round((Date.now() - state.lastUpdatedAt.getTime()) / 1000);
+        upd.textContent = `Updated: ${sec < 5 ? 'just now' : sec + 's ago'}`;
+    } else {
+        upd.textContent = state.sseOnline ? 'Connected' : 'Reconnecting…';
+    }
+}
+
+// ── Rendering: Executive Summary ───────────────────────────────────────────
+function renderExecSummary() {
+    const h = state.health;
+    if (!h) return;
+
+    const score = h.opsScore;
+    const col   = scoreColor(score);
+    const label = score >= 80 ? 'Healthy' : score >= 60 ? 'Needs Attention' : 'Critical';
+
+    document.getElementById('exec-score').textContent = score;
+    document.getElementById('exec-score').className = `health-score-num ${col}`;
+    document.getElementById('exec-status').textContent = label;
+    document.getElementById('exec-status').className = `health-score-status ${col}`;
+
+    const comps = [
+        { key: 'slaHealth',      label: 'SLA Health',      detail: 'Phase 3 engine' },
+        { key: 'queueHealth',    label: 'Queue Health',     detail: `${h.summary.queueTotal} pending` },
+        { key: 'staffingHealth', label: 'Staffing',         detail: `${h.summary.agentsOnShift}/${h.summary.agentsTotal} on shift` },
+        { key: 'loadHealth',     label: 'Load Balance',     detail: '' },
+    ];
+
+    document.getElementById('sub-scores-grid').innerHTML = comps.map(c => {
+        const val = h.components[c.key] ?? 100;
+        const cl  = val >= 75 ? 'green' : val >= 50 ? 'yellow' : 'red';
+        return `
+        <div class="sub-score-card">
+            <div class="sub-score-name">${c.label}</div>
+            <div class="sub-score-value" style="color:${cl === 'green' ? '#16a34a' : cl === 'yellow' ? '#d97706' : '#dc2626'}">${val}</div>
+            <div class="sub-score-bar"><div class="sub-score-fill ${cl}" style="width:${val}%"></div></div>
+            <div class="sub-score-detail">${c.detail}</div>
+        </div>`;
+    }).join('');
+}
+
+// ── Rendering: Stats Row ───────────────────────────────────────────────────
+function renderStatsRow() {
+    const q = state.queue;
+    const growthVal = q.global_growth_rate;
+    const growthText = growthVal > 0 ? `+${growthVal}/hr` : growthVal < 0 ? `${growthVal}/hr` : '0/hr';
+
+    document.getElementById('stat-queue').textContent       = q.global_total;
+    document.getElementById('stat-unassigned').textContent  = q.unassigned_count;
+
+    const $growth = document.getElementById('stat-growth');
+    $growth.textContent = growthText;
+    $growth.className = 's-value ' + (growthVal > 5 ? 'red' : growthVal > 0 ? 'yellow' : 'green');
+
+    const onShift    = state.agents.filter(a => a.status !== 'off_shift').length;
+    const inSession  = state.agents.filter(a => a.status === 'in_session').length;
+    const todaySess  = state.agents.reduce((s, a) => s + (a.today_sessions || 0), 0);
+
+    document.getElementById('stat-on-shift').textContent    = `${onShift}/${state.agents.length}`;
+    document.getElementById('stat-in-session').textContent  = inSession;
+    document.getElementById('stat-sessions-today').textContent = todaySess;
+}
+
+// ── Rendering: Queue Grid ──────────────────────────────────────────────────
+function renderQueueGrid() {
+    const byAgent = state.queue.byAgent || [];
+    const grid = document.getElementById('queue-grid');
+
+    if (byAgent.length === 0 && state.queue.capturedAt === null) {
+        grid.innerHTML = '<div class="empty-state">Waiting for first queue poll…</div>';
+        return;
+    }
+
+    const totalHTML = `
+    <div class="queue-global-card">
+        <div class="qc-name">Global Total</div>
+        <div class="qc-count">${state.queue.global_total}</div>
+        <div class="qc-label">pending chats</div>
+        <div class="qc-meta">
+            <span>${growthArrow(state.queue.global_growth_rate)} ${Math.abs(state.queue.global_growth_rate)}/hr</span>
+            <span>Unassigned: ${state.queue.unassigned_count}</span>
+        </div>
+    </div>`;
+
+    const agentCards = byAgent.map(a => {
+        const sev = agentSeverity(a);
+        const wl  = state.workload.agents?.find(w => w.agent_id === a.agent_id);
+        const ratio = wl?.workload_ratio ?? null;
+        return `
+        <div class="queue-card sev-${sev}">
+            <div class="qc-name">${esc(a.agent_name)}</div>
+            <div class="qc-count">${a.pending_count}</div>
+            <div class="qc-label">pending</div>
+            <div class="qc-meta">
+                <span class="sev-badge ${sev}">${sev}</span>
+                <span class="growth-indicator ${growthClass(a.growth_rate_per_hour)}">
+                    ${growthArrow(a.growth_rate_per_hour)} ${Math.abs(a.growth_rate_per_hour)}/hr
+                </span>
+            </div>
+            ${ratio !== null ? `<div class="util-bar-wrap">
+                <div class="util-bar-label"><span>Workload</span><span>${Math.round(ratio*100)}%</span></div>
+                <div class="util-bar-track"><div class="util-bar-fill ${utilClass(ratio)}" style="width:${Math.min(ratio*100,100)}%"></div></div>
+            </div>` : ''}
+        </div>`;
+    }).join('');
+
+    grid.innerHTML = totalHTML + agentCards;
+}
+
+// ── Rendering: Agent Grid ──────────────────────────────────────────────────
+function renderAgentGrid() {
+    const grid = document.getElementById('agent-grid');
+    if (state.agents.length === 0) {
+        grid.innerHTML = '<div class="empty-state">No agents found.</div>';
+        return;
+    }
+
+    grid.innerHTML = state.agents.map(a => {
+        const statusText = {
+            in_session:       'In Session',
+            between_sessions: 'Between Sessions',
+            idle:             'Idle',
+            on_break:         'On Break',
+            off_shift:        'Off Shift',
+        }[a.status] ?? a.status;
+
+        const wl    = state.workload.agents?.find(w => w.agent_id === a.id);
+        const ratio = wl?.workload_ratio ?? null;
+        const pending = state.queue.byAgent?.find(q => q.agent_id === a.id)?.pending_count ?? '—';
+
+        let idleStr = '';
+        if (a.idle_since) {
+            const idleSec = Math.round((Date.now() - new Date(a.idle_since).getTime()) / 1000);
+            idleStr = `Idle: ${fmtDuration(idleSec)}`;
+        }
+
+        const burnout = ratio !== null ? burnoutLevel(ratio, a) : null;
+
+        return `
+        <div class="agent-card s-${a.status}">
+            <div class="ac-header">
+                <div class="ac-name">${esc(a.name)}</div>
+                <div class="status-dot ${a.status}"></div>
+            </div>
+            <div class="ac-status-text">${statusText}</div>
+            ${a.current_chat_name
+                ? `<div class="ac-detail"><strong>Chat:</strong> ${esc(a.current_chat_name)}</div>` : ''}
+            ${idleStr
+                ? `<div class="ac-detail" style="color:#dc2626">${idleStr}</div>` : ''}
+            <div class="ac-detail"><strong>Today:</strong> ${a.today_sessions ?? 0} sessions</div>
+            <div class="ac-detail"><strong>Pending:</strong> ${pending}</div>
+            ${ratio !== null ? `
+            <div class="util-bar-wrap">
+                <div class="util-bar-label"><span>Workload</span><span>${Math.round(ratio*100)}%</span></div>
+                <div class="util-bar-track"><div class="util-bar-fill ${utilClass(ratio)}" style="width:${Math.min(ratio*100,100)}%"></div></div>
+            </div>
+            ${burnout ? `<div class="burnout-badge ${burnout.level}">${burnout.label}</div>` : ''}` : ''}
+        </div>`;
+    }).join('');
+}
+
+// ── Rendering: Alert Bar ───────────────────────────────────────────────────
+function renderAlertBar() {
+    if (alertBarDismissed) return;
+    const criticals = state.alerts.filter(a => !a.is_acknowledged && a.severity === 'critical');
+    const bar = document.getElementById('alert-bar');
+    if (criticals.length === 0) {
+        bar.classList.remove('show');
+        return;
+    }
+    const top = criticals[0];
+    document.getElementById('alert-bar-text').textContent =
+        `CRITICAL: ${top.title}${criticals.length > 1 ? ` (+${criticals.length - 1} more)` : ''}`;
+    bar.classList.add('show');
+}
+
+function dismissAlertBar() {
+    alertBarDismissed = true;
+    document.getElementById('alert-bar').classList.remove('show');
+}
+
+// ── Rendering: Alerts List ─────────────────────────────────────────────────
+function renderAlertsList() {
+    const list = document.getElementById('alerts-list');
+    let items = state.alerts;
+
+    if (alertFilter === 'unacked')  items = items.filter(a => !a.is_acknowledged);
+    if (alertFilter === 'critical') items = items.filter(a => a.severity === 'critical');
+    if (alertFilter === 'warning')  items = items.filter(a => a.severity === 'warning');
+
+    if (items.length === 0) {
+        list.innerHTML = '<div class="empty-state">No alerts match this filter.</div>';
+        return;
+    }
+
+    list.innerHTML = items.map(a => `
+    <div class="alert-row sev-${a.severity} ${a.is_acknowledged ? 'acked' : ''}" id="alert-row-${a.id}">
+        <span class="alert-sev-badge ${a.severity}">${a.severity}</span>
+        <div class="alert-body">
+            <div class="alert-title">${esc(a.title)}</div>
+            ${a.body ? `<div class="alert-text">${esc(a.body)}</div>` : ''}
+            <div class="alert-meta">
+                ${a.package_name ? `${esc(a.package_name)} · ` : ''}
+                ${a.agent_name   ? `${esc(a.agent_name)} · ` : ''}
+                ${fmtRelTime(a.created_at)}
+                ${a.is_acknowledged ? ' · Acknowledged' : ''}
+            </div>
+        </div>
+        ${!a.is_acknowledged
+            ? `<button class="ack-btn" onclick="acknowledgeAlert(${a.id})">Acknowledge</button>`
+            : ''}
+    </div>`).join('');
+}
+
+async function acknowledgeAlert(id) {
+    try {
+        const r = await API(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
+        if (!r.ok) return;
+        const a = state.alerts.find(x => x.id === id);
+        if (a) { a.is_acknowledged = true; a.acknowledged_at = new Date().toISOString(); }
+        renderAlertsList();
+        renderAlertBar();
+        renderKpi();
+    } catch { /* non-critical */ }
+}
+
+function setAlertFilter(f) {
+    alertFilter = f;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(`filter-${f}`).classList.add('active');
+    renderAlertsList();
+}
+
+// ── Tab Switching ──────────────────────────────────────────────────────────
+function showTab(id) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById(`tab-${id}`).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.getAttribute('onclick') === `showTab('${id}')`) btn.classList.add('active');
+    });
+    if (id === 'alerts') { alertBarDismissed = false; renderAlertBar(); }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function scoreColor(n) {
+    return n >= 80 ? 'green' : n >= 60 ? 'yellow' : 'red';
+}
+
+function agentSeverity(a) {
+    if (a.growth_rate_per_hour >= 5 || a.pending_count > 25) return 'red';
+    if (a.growth_rate_per_hour >= 2 || a.pending_count > 10) return 'yellow';
+    return 'green';
+}
+
+function utilClass(ratio) {
+    return ratio > 1 ? 'overloaded' : ratio > 0.7 ? 'busy' : 'healthy';
+}
+
+function burnoutLevel(ratio, agent) {
+    const score = ratio * 0.70 + (agent.status === 'idle' ? 0.15 : 0);
+    if (score > 1)    return { level: 'high',     label: 'Burnout Risk: HIGH' };
+    if (score > 0.65) return { level: 'elevated',  label: 'Burnout Risk: Elevated' };
+    return null;
+}
+
+function growthClass(rate) {
+    return rate > 0 ? 'up' : rate < 0 ? 'down' : 'flat';
+}
+
+function growthArrow(rate) {
+    return rate > 0 ? '▲' : rate < 0 ? '▼' : '→';
+}
+
+function fmtDuration(sec) {
+    if (sec < 60)   return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+}
+
+function fmtRelTime(iso) {
+    if (!iso) return '';
+    const sec = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (sec < 60)   return `${sec}s ago`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    return `${Math.floor(sec / 3600)}h ago`;
+}
+
+function esc(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function logout() {
+    localStorage.removeItem('adminToken');
+    location.href = '/';
+}
+
+// ── KPI auto-refresh (relative time stamps) ────────────────────────────────
+setInterval(renderKpi, 15_000);
+
+// ── Init ───────────────────────────────────────────────────────────────────
+(async () => {
+    await Promise.all([fetchAgents(), fetchAlerts(), fetchHealth()]);
+    fetchWorkload(); // slower call — don't block init
+    connectSSE();
+
+    // Periodic polling
+    setInterval(fetchAgents,  30_000);
+    setInterval(fetchWorkload, 60_000);
+    setInterval(fetchAlerts,   30_000);
+    setInterval(fetchHealth,   60_000);
+})();
+</script>
+</body>
+</html>

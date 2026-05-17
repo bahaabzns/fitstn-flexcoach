@@ -120,7 +120,17 @@ const agentOverviewRoutes = require("./routes/agent-overview")(sql, getCachedSet
 const activityEventRoutes = require("./routes/activity-events")(sql, requireAgent, requireAdmin);
 const staffAssignatorRoutes = require("./routes/staff-assignator")(requireAdmin);
 const demandReportRoutes = require("./routes/demand-report")(sql, supabase, ensureSupabaseAuth, requireAdmin);
+const alertRoutes         = require("./routes/alerts")(sql, requireAdmin);
 const { computeGapIdle } = require("./utils/shift-utils");
+
+// SSE — broadcast is exported so QueueEngine (and future engines) can push updates
+const sseModule   = require("./routes/sse");
+const sseRoutes   = sseModule(sql, requireAdmin);
+const { broadcast } = sseModule;
+
+// Queue engine — instantiated here so it can be started after DB init
+const QueueEngine = require("./services/queue-engine");
+const queueEngine = new QueueEngine({ sql, supabase, ensureSupabaseAuth, broadcast });
 
 // CORS: restrict to known clients (dev + production + FlexCoach host page for content scripts)
 const ALLOWED_ORIGINS = [
@@ -154,6 +164,80 @@ app.use("/api/agent-overview", agentOverviewRoutes);
 app.use("/api", activityEventRoutes);
 app.use("/api/staff-assignator", staffAssignatorRoutes);
 app.use("/api", demandReportRoutes);
+app.use("/api", alertRoutes);
+app.use("/api", sseRoutes);
+
+// Returns the current in-memory queue state built by QueueEngine
+app.get("/api/queue-state", requireAdmin, (req, res) => {
+    res.json(queueEngine.getState());
+});
+
+// Operational health score — composite of queue pressure, staffing, and load
+// SLA component defaults to 100 until Phase 3 SLA engine is wired up
+app.get("/api/ops-health", requireAdmin, async (req, res) => {
+    try {
+        const queueState = queueEngine.getState();
+
+        const agents = await sql`
+            SELECT a.id,
+                   (EXISTS(
+                       SELECT 1 FROM shifts s
+                       WHERE s.agent_id = a.id AND s.shift_ended_at IS NULL
+                   )) AS on_shift,
+                   (EXISTS(
+                       SELECT 1 FROM sessions s
+                       WHERE s.agent_id = a.id AND s.ended_at IS NULL
+                   )) AS in_session
+            FROM agents a
+            WHERE a.is_active = TRUE
+        `;
+
+        const totalAgents    = agents.length;
+        const onShift        = agents.filter(a => a.on_shift).length;
+        const inSession      = agents.filter(a => a.in_session).length;
+        const globalTotal    = queueState.global_total    || 0;
+        const growthRate     = queueState.global_growth_rate || 0;
+
+        // Queue health: penalised by pending load and positive growth rate
+        const queueLoad      = Math.min(1, globalTotal / Math.max(onShift * 15, 1));
+        const growthPenalty  = growthRate > 0 ? Math.min(30, growthRate * 3) : 0;
+        const queueHealth    = Math.max(0, Math.round(100 - queueLoad * 70 - growthPenalty));
+
+        // Staffing health: fraction of agents currently on shift
+        const staffingHealth = totalAgents > 0 ? Math.round((onShift / totalAgents) * 100) : 100;
+
+        // Load health: agents with >20 pending chats are considered overloaded
+        const byAgent        = queueState.byAgent ?? [];
+        const overloaded     = byAgent.filter(a => a.pending_count > 20).length;
+        const loadHealth     = byAgent.length > 0
+            ? Math.max(0, Math.round(100 - (overloaded / byAgent.length) * 100))
+            : 100;
+
+        // SLA health placeholder — Phase 3 will replace with projected_sla_eod
+        const slaHealth = 100;
+
+        const opsScore = Math.round(
+            slaHealth      * 0.40 +
+            queueHealth    * 0.30 +
+            staffingHealth * 0.15 +
+            loadHealth     * 0.15
+        );
+
+        res.json({
+            opsScore,
+            components: { slaHealth, queueHealth, staffingHealth, loadHealth },
+            summary: {
+                agentsOnShift:   onShift,
+                agentsInSession: inSession,
+                agentsTotal:     totalAgents,
+                queueTotal:      globalTotal,
+                queueGrowthRate: growthRate,
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to compute ops health", details: err.message });
+    }
+});
 
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "login.html"));
@@ -162,43 +246,101 @@ app.get("/", (req, res) => {
 app.get("/api/overview", requireAdmin, async (req, res) => {
     try {
         const result = await sql`
+            WITH active_shifts AS (
+                SELECT DISTINCT ON (agent_id)
+                    agent_id,
+                    id            AS shift_id,
+                    shift_started_at
+                FROM shifts
+                WHERE shift_ended_at IS NULL
+                ORDER BY agent_id, shift_started_at DESC
+            ),
+            current_sessions AS (
+                SELECT DISTINCT ON (agent_id)
+                    agent_id,
+                    id        AS session_id,
+                    chat_name,
+                    clicked_at AS chat_started_at
+                FROM sessions
+                WHERE ended_at IS NULL
+                ORDER BY agent_id, clicked_at DESC
+            ),
+            last_ended_sessions AS (
+                SELECT DISTINCT ON (agent_id)
+                    agent_id,
+                    ended_at AS last_session_ended_at
+                FROM sessions
+                WHERE ended_at IS NOT NULL
+                ORDER BY agent_id, ended_at DESC
+            ),
+            active_breaks AS (
+                SELECT DISTINCT ON (sh.agent_id)
+                    sh.agent_id,
+                    sb.id AS break_id
+                FROM shift_breaks sb
+                JOIN shifts sh ON sb.shift_id = sh.id
+                WHERE sh.shift_ended_at IS NULL AND sb.ended_at IS NULL
+                ORDER BY sh.agent_id, sb.started_at DESC
+            ),
+            today_sessions AS (
+                SELECT
+                    agent_id,
+                    COUNT(*)::int                                                                                                    AS total,
+                    COUNT(*) FILTER (WHERE ended_at IS NOT NULL AND jsonb_array_length(COALESCE(messages,'[]'::jsonb)) = 0)::int    AS empty_count,
+                    COUNT(*) FILTER (WHERE last_message_from = 'client')::int                                                       AS client_count,
+                    COUNT(*) FILTER (WHERE last_message_from = 'staff')::int                                                        AS staff_count
+                FROM sessions
+                WHERE clicked_at >= CURRENT_DATE
+                GROUP BY agent_id
+            ),
+            shift_active AS (
+                SELECT
+                    sh.agent_id,
+                    COALESCE(SUM(EXTRACT(EPOCH FROM (
+                        LEAST(COALESCE(s.ended_at, NOW()), COALESCE(sh.shift_ended_at, NOW()))
+                        - GREATEST(s.clicked_at, sh.shift_started_at)
+                    ))), 0)::int AS active_seconds
+                FROM active_shifts sh
+                JOIN sessions s ON s.agent_id = sh.agent_id
+                WHERE s.clicked_at < COALESCE((SELECT shift_ended_at FROM shifts WHERE id = sh.shift_id), NOW())
+                  AND COALESCE(s.ended_at, NOW()) > sh.shift_started_at
+                GROUP BY sh.agent_id
+            ),
+            shift_breaks_sum AS (
+                SELECT
+                    sh.agent_id,
+                    COALESCE(SUM(EXTRACT(EPOCH FROM (
+                        COALESCE(sb.ended_at, NOW()) - sb.started_at
+                    ))), 0)::int AS break_seconds
+                FROM shift_breaks sb
+                JOIN active_shifts sh ON sb.shift_id = sh.shift_id
+                GROUP BY sh.agent_id
+            )
             SELECT
                 a.id, a.name, a.email,
-                (SELECT sh.id FROM shifts sh WHERE sh.agent_id = a.id AND sh.shift_ended_at IS NULL ORDER BY sh.shift_started_at DESC LIMIT 1) AS shift_id,
-                (SELECT sh.shift_started_at FROM shifts sh WHERE sh.agent_id = a.id AND sh.shift_ended_at IS NULL ORDER BY sh.shift_started_at DESC LIMIT 1) AS shift_started_at,
-                (SELECT s.id FROM sessions s WHERE s.agent_id = a.id AND s.ended_at IS NULL ORDER BY s.clicked_at DESC LIMIT 1) AS current_session_id,
-                (SELECT s.chat_name FROM sessions s WHERE s.agent_id = a.id AND s.ended_at IS NULL ORDER BY s.clicked_at DESC LIMIT 1) AS current_chat_name,
-                (SELECT s.clicked_at FROM sessions s WHERE s.agent_id = a.id AND s.ended_at IS NULL ORDER BY s.clicked_at DESC LIMIT 1) AS current_chat_started_at,
-                (SELECT s.ended_at FROM sessions s WHERE s.agent_id = a.id AND s.ended_at IS NOT NULL ORDER BY s.ended_at DESC LIMIT 1) AS last_session_ended_at,
-                (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE) AS today_sessions,
-                (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE AND s.ended_at IS NOT NULL AND jsonb_array_length(COALESCE(s.messages, '[]'::jsonb)) = 0) AS today_empty_sessions,
-                (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE AND s.last_message_from = 'client') AS today_client_sessions,
-                (SELECT COUNT(*)::int FROM sessions s WHERE s.agent_id = a.id AND s.clicked_at >= CURRENT_DATE AND s.last_message_from = 'staff') AS today_staff_sessions,
-                (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
-                    LEAST(COALESCE(s.ended_at, NOW()), COALESCE(sh2.shift_ended_at, NOW()))
-                    - GREATEST(s.clicked_at, sh2.shift_started_at)
-                ))), 0)::int
-                FROM sessions s, shifts sh2
-                WHERE s.agent_id = a.id AND sh2.agent_id = a.id AND sh2.shift_ended_at IS NULL
-                AND s.clicked_at < COALESCE(sh2.shift_ended_at, NOW())
-                AND COALESCE(s.ended_at, NOW()) > sh2.shift_started_at
-                ) AS shift_active_seconds,
-                (SELECT sb.id FROM shift_breaks sb
-                    JOIN shifts sh3 ON sb.shift_id = sh3.id
-                    WHERE sh3.agent_id = a.id AND sh3.shift_ended_at IS NULL AND sb.ended_at IS NULL
-                    LIMIT 1) AS active_break_id,
-                (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (
-                    COALESCE(sb.ended_at, NOW()) - sb.started_at
-                ))), 0)::int
-                FROM shift_breaks sb
-                JOIN shifts sh4 ON sb.shift_id = sh4.id
-                WHERE sh4.agent_id = a.id AND sh4.shift_ended_at IS NULL
-                ) AS shift_break_seconds
+                ash.shift_id,
+                ash.shift_started_at,
+                cs.session_id          AS current_session_id,
+                cs.chat_name           AS current_chat_name,
+                cs.chat_started_at     AS current_chat_started_at,
+                les.last_session_ended_at,
+                ab.break_id            AS active_break_id,
+                COALESCE(ts.total,        0) AS today_sessions,
+                COALESCE(ts.empty_count,  0) AS today_empty_sessions,
+                COALESCE(ts.client_count, 0) AS today_client_sessions,
+                COALESCE(ts.staff_count,  0) AS today_staff_sessions,
+                COALESCE(sa.active_seconds, 0) AS shift_active_seconds,
+                COALESCE(sbs.break_seconds, 0) AS shift_break_seconds
             FROM agents a
+            LEFT JOIN active_shifts       ash ON ash.agent_id = a.id
+            LEFT JOIN current_sessions    cs  ON cs.agent_id  = a.id
+            LEFT JOIN last_ended_sessions les ON les.agent_id = a.id
+            LEFT JOIN active_breaks       ab  ON ab.agent_id  = a.id
+            LEFT JOIN today_sessions      ts  ON ts.agent_id  = a.id
+            LEFT JOIN shift_active        sa  ON sa.agent_id  = a.id
+            LEFT JOIN shift_breaks_sum    sbs ON sbs.agent_id = a.id
             WHERE a.is_active = true
-            ORDER BY
-                (EXISTS (SELECT 1 FROM shifts sh WHERE sh.agent_id = a.id AND sh.shift_ended_at IS NULL)) DESC,
-                a.name ASC
+            ORDER BY (ash.shift_id IS NOT NULL) DESC, a.name ASC
         `;
 
         // Fetch activity threshold from settings (cached)
@@ -838,14 +980,28 @@ async function takeDemandSnapshot() {
         ...overrides,
     });
 
-    const today = formatLocalDate(new Date());
-    const results = [];
+    const now         = new Date();
+    const today       = formatLocalDate(now);
+    const snapshotHour = now.getHours();
+    const results     = [];
+
+    // Load previous hour's snapshot for delta computation (incoming/handled)
+    const prevHour = snapshotHour === 0 ? 23 : snapshotHour - 1;
+    const prevRows = await sql`
+        SELECT agent_id, pending_count
+        FROM hourly_demand_snapshots
+        WHERE snapshot_date = CURRENT_DATE
+          AND snapshot_hour = ${prevHour}
+          AND package_name  = 'all'
+    `;
+    const prevByAgent = Object.fromEntries(prevRows.map(r => [String(r.agent_id), r.pending_count]));
 
     for (const agent of agents) {
         try {
             const { data, error } = await supabase.rpc("get_chat_rooms_paginated", rpcParams({ p_assigned_staff_id: agent.fitstn_id }));
             const demandCount = error ? 0 : (data?.total || 0);
 
+            // ── daily snapshot (existing table) ─────────────────────────────
             await sql`
                 INSERT INTO demand_snapshots (snapshot_date, agent_id, agent_name, demand_count, cutoff_demand_count)
                 VALUES (${today}, ${agent.id}, ${agent.name}, ${demandCount}, ${isPastCutoff ? demandCount : null})
@@ -857,6 +1013,26 @@ async function takeDemandSnapshot() {
                     created_at = NOW()
             `;
 
+            // ── hourly snapshot (new table) ──────────────────────────────────
+            const prevCount    = prevByAgent[String(agent.id)] ?? demandCount;
+            const incomingCount = Math.max(0, demandCount - prevCount);  // chats that arrived since last hour
+            const handledCount  = Math.max(0, prevCount - demandCount);  // chats that were handled since last hour
+
+            await sql`
+                INSERT INTO hourly_demand_snapshots
+                    (snapshot_date, snapshot_hour, agent_id, package_name,
+                     pending_count, incoming_count, handled_count, agent_active)
+                VALUES
+                    (${today}, ${snapshotHour}, ${agent.id}, 'all',
+                     ${demandCount}, ${incomingCount}, ${handledCount}, TRUE)
+                ON CONFLICT (snapshot_date, snapshot_hour, agent_id, package_name)
+                DO UPDATE SET
+                    pending_count  = EXCLUDED.pending_count,
+                    incoming_count = EXCLUDED.incoming_count,
+                    handled_count  = EXCLUDED.handled_count,
+                    agent_active   = TRUE
+            `;
+
             results.push({ agent_id: agent.id, agent_name: agent.name, demand_count: demandCount });
         } catch (err) {
             console.error(`Snapshot failed for ${agent.name}:`, err.message);
@@ -864,7 +1040,7 @@ async function takeDemandSnapshot() {
         }
     }
 
-    return { saved: results.length, snapshot_date: today, agents: results };
+    return { saved: results.length, snapshot_date: today, snapshot_hour: snapshotHour, agents: results };
 }
 
 app.post("/api/demand-snapshot", requireAdmin, async (req, res) => {
@@ -1372,6 +1548,197 @@ app.listen(PORT, async () => {
         await sql`ALTER TABLE daily_stats_cache ADD COLUMN IF NOT EXISTS client_messages INT NOT NULL DEFAULT 0`;
         await sql`ALTER TABLE daily_stats_cache ADD COLUMN IF NOT EXISTS coach_messages  INT NOT NULL DEFAULT 0`;
 
+        // ── Phase-1 schema additions ──────────────────────────────────────────
+
+        // Per-package capacity & complexity config (editable by admins)
+        await sql`
+            CREATE TABLE IF NOT EXISTS agent_capacity_config (
+                id                   SERIAL PRIMARY KEY,
+                package_name         VARCHAR(100) NOT NULL UNIQUE,
+                complexity_weight    NUMERIC(4,2) NOT NULL DEFAULT 1.0,
+                avg_handling_minutes NUMERIC(6,2) NOT NULL DEFAULT 10.0,
+                max_concurrent_chats SMALLINT     NOT NULL DEFAULT 3,
+                sla_priority         SMALLINT     NOT NULL DEFAULT 3,
+                is_scheduled_workload BOOLEAN     NOT NULL DEFAULT FALSE,
+                updated_at           TIMESTAMP    DEFAULT NOW()
+            )
+        `;
+        await sql`
+            INSERT INTO agent_capacity_config
+                (package_name, complexity_weight, avg_handling_minutes, max_concurrent_chats, sla_priority, is_scheduled_workload)
+            VALUES
+                ('Fit Solo Pro', 1.5, 12.0, 2, 1, FALSE),
+                ('Fit Fam Pro',  1.5, 12.0, 2, 2, FALSE),
+                ('Fit Solo',     1.0, 10.0, 3, 3, FALSE),
+                ('Fit Duo',      1.0, 10.0, 3, 3, FALSE),
+                ('Fit Fam',      1.1, 11.0, 3, 3, FALSE),
+                ('Fit Express',  0.4,  5.0, 5, 4, TRUE)
+            ON CONFLICT (package_name) DO NOTHING
+        `;
+
+        // Live queue snapshots — time-series written by QueueEngine every 5 m
+        await sql`
+            CREATE TABLE IF NOT EXISTS queue_snapshots (
+                id            SERIAL PRIMARY KEY,
+                snapshot_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+                agent_id      INTEGER      REFERENCES agents(id),
+                package_name  VARCHAR(100) NOT NULL DEFAULT 'all',
+                pending_count INTEGER      NOT NULL DEFAULT 0
+            )
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_queue_snapshots_time
+            ON queue_snapshots(snapshot_at DESC)
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_queue_snapshots_agent_time
+            ON queue_snapshots(agent_id, snapshot_at DESC)
+        `;
+
+        // Current queue state (latest values — queried by SSE init payload)
+        await sql`
+            CREATE TABLE IF NOT EXISTS queue_state (
+                id               SERIAL PRIMARY KEY,
+                captured_at      TIMESTAMP    NOT NULL DEFAULT NOW(),
+                entity_type      VARCHAR(20)  NOT NULL DEFAULT 'agent',
+                entity_id        VARCHAR(100) NOT NULL,
+                pending_count    INTEGER      NOT NULL DEFAULT 0,
+                growth_rate_per_hour NUMERIC(8,2) DEFAULT 0,
+                oldest_pending_at TIMESTAMP,
+                near_breach_count INTEGER     NOT NULL DEFAULT 0,
+                severity         VARCHAR(10)  NOT NULL DEFAULT 'green'
+            )
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_queue_state_time
+            ON queue_state(captured_at DESC)
+        `;
+
+        // SLA risk scores — computed by the SLA engine every 15 m (Phase 3)
+        await sql`
+            CREATE TABLE IF NOT EXISTS sla_risk_scores (
+                id                 SERIAL PRIMARY KEY,
+                computed_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+                package_name       VARCHAR(100) NOT NULL,
+                risk_level         VARCHAR(10)  NOT NULL DEFAULT 'low',
+                risk_score         NUMERIC(5,2) NOT NULL DEFAULT 0,
+                current_sla_rate   NUMERIC(5,2),
+                projected_sla_1h   NUMERIC(5,2),
+                projected_sla_eod  NUMERIC(5,2),
+                breach_probability NUMERIC(5,2),
+                predicted_breaches INTEGER      DEFAULT 0,
+                current_queue      INTEGER      DEFAULT 0,
+                projected_queue_1h INTEGER      DEFAULT 0,
+                incoming_rate      NUMERIC(8,2),
+                handling_rate      NUMERIC(8,2),
+                agents_needed      INTEGER      DEFAULT 0,
+                UNIQUE(computed_at, package_name)
+            )
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_sla_risk_time
+            ON sla_risk_scores(package_name, computed_at DESC)
+        `;
+
+        // Operational alerts — written by the alert engine, read by the ops dashboard
+        await sql`
+            CREATE TABLE IF NOT EXISTS operational_alerts (
+                id                SERIAL PRIMARY KEY,
+                created_at        TIMESTAMP   NOT NULL DEFAULT NOW(),
+                severity          VARCHAR(10) NOT NULL DEFAULT 'info',
+                alert_type        VARCHAR(50) NOT NULL,
+                title             TEXT        NOT NULL,
+                body              TEXT,
+                package_name      VARCHAR(100),
+                agent_id          INTEGER     REFERENCES agents(id),
+                metric_value      NUMERIC(10,2),
+                metric_threshold  NUMERIC(10,2),
+                is_acknowledged   BOOLEAN     NOT NULL DEFAULT FALSE,
+                acknowledged_at   TIMESTAMP,
+                acknowledged_by   INTEGER     REFERENCES admins(id),
+                auto_resolved     BOOLEAN     NOT NULL DEFAULT FALSE,
+                resolved_at       TIMESTAMP
+            )
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_alerts_created
+            ON operational_alerts(created_at DESC)
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_alerts_unacked
+            ON operational_alerts(severity, created_at DESC)
+            WHERE is_acknowledged = FALSE
+        `;
+
+        // Fit Express scheduled follow-up tracker (weekly batch workload)
+        await sql`
+            CREATE TABLE IF NOT EXISTS fit_express_schedule (
+                id             SERIAL PRIMARY KEY,
+                schedule_date  DATE         NOT NULL,
+                weekday        SMALLINT     NOT NULL,
+                coach_name     VARCHAR(255),
+                total_rooms    INTEGER      NOT NULL DEFAULT 0,
+                replied_count  INTEGER      NOT NULL DEFAULT 0,
+                pending_count  INTEGER      NOT NULL DEFAULT 0,
+                completion_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+                created_at     TIMESTAMP    DEFAULT NOW(),
+                updated_at     TIMESTAMP    DEFAULT NOW(),
+                UNIQUE(schedule_date, coach_name)
+            )
+        `;
+
+        // Hourly demand snapshots — more granular than the daily demand_snapshots table
+        await sql`
+            CREATE TABLE IF NOT EXISTS hourly_demand_snapshots (
+                id             SERIAL    PRIMARY KEY,
+                snapshot_date  DATE      NOT NULL,
+                snapshot_hour  SMALLINT  NOT NULL,
+                agent_id       INTEGER   REFERENCES agents(id),
+                package_name   VARCHAR(100) NOT NULL DEFAULT 'all',
+                pending_count  INTEGER   NOT NULL DEFAULT 0,
+                incoming_count INTEGER   NOT NULL DEFAULT 0,
+                handled_count  INTEGER   NOT NULL DEFAULT 0,
+                breach_count   INTEGER   NOT NULL DEFAULT 0,
+                agent_active   BOOLEAN   NOT NULL DEFAULT TRUE,
+                UNIQUE(snapshot_date, snapshot_hour, agent_id, package_name)
+            )
+        `;
+        await sql`
+            CREATE INDEX IF NOT EXISTS idx_hourly_snap_date
+            ON hourly_demand_snapshots(snapshot_date, snapshot_hour)
+        `;
+
+        // Nightly forecast model parameters per package × weekday
+        await sql`
+            CREATE TABLE IF NOT EXISTS forecast_models (
+                id               SERIAL PRIMARY KEY,
+                package_name     VARCHAR(100) NOT NULL,
+                weekday          SMALLINT     NOT NULL,
+                model_type       VARCHAR(20)  NOT NULL DEFAULT 'ema',
+                alpha            NUMERIC(4,3) NOT NULL DEFAULT 0.3,
+                forecast_demand  NUMERIC(8,2),
+                seasonality_index NUMERIC(6,3) NOT NULL DEFAULT 1.0,
+                std_deviation    NUMERIC(8,2),
+                agents_required  NUMERIC(6,2),
+                confidence_low   NUMERIC(8,2),
+                confidence_high  NUMERIC(8,2),
+                last_computed_at TIMESTAMP    DEFAULT NOW(),
+                UNIQUE(package_name, weekday)
+            )
+        `;
+
+        // ── Per-agent column additions ─────────────────────────────────────────
+        await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS package_specialty  VARCHAR(100)`;
+        await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS max_concurrent_chats SMALLINT DEFAULT 3`;
+        await sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS status_updated_at  TIMESTAMP`;
+
+        // Per-session package tracking (backfilled from Supabase in later phases)
+        await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS package_name        VARCHAR(100)`;
+        await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS first_response_seconds INTEGER`;
+
+        // Package-level demand breakdown per daily snapshot
+        await sql`ALTER TABLE demand_snapshots ADD COLUMN IF NOT EXISTS package_breakdown JSONB DEFAULT '{}'`;
+
         // Seed default admin
         const existingAdmin = await sql`SELECT id FROM admins WHERE email = 'admin@fitstn.com'`;
         if (existingAdmin.length === 0) {
@@ -1410,11 +1777,14 @@ app.listen(PORT, async () => {
             try {
                 console.log("Taking hourly demand snapshot...");
                 const result = await takeDemandSnapshot();
-                console.log(`Demand snapshot updated: ${result.saved} agents for ${result.snapshot_date}`);
+                console.log(`Demand snapshot updated: ${result.saved} agents for ${result.snapshot_date} hour ${result.snapshot_hour}`);
             } catch (err) {
                 console.error("Auto demand snapshot failed:", err.message);
             }
         }, SNAPSHOT_INTERVAL_MS);
+
+        // Queue engine — polls Supabase every 60 s and broadcasts via SSE
+        queueEngine.start();
 
         console.log("Database schema ready.");
     } catch (err) {

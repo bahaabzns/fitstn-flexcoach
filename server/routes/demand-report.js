@@ -1,27 +1,5 @@
 const express = require("express");
-
-const SLA_RULES = {
-    'Fit Solo Pro': { maxMinutes: 60,   days: [0,1,2,3,4,5], startHour: 12, endHour: 21, crossMidnight: false },
-    'Fit Fam Pro':  { maxMinutes: 60,   days: [0,1,2,3,4,5], startHour: 12, endHour: 21, crossMidnight: false },
-    'Fit Solo':     { maxMinutes: 1440, days: [0,1,2,3,4],   startHour: 11, endHour: 18, crossMidnight: false },
-    'Fit Duo':      { maxMinutes: 1440, days: [0,1,2,3,4],   startHour: 11, endHour: 18, crossMidnight: false },
-    'Fit Fam':      { maxMinutes: 1440, days: [0,1,2,3,4],   startHour: 11, endHour: 18, crossMidnight: false },
-};
-const UTC_OFFSET  = 2;
-const TENANT_ID   = process.env.TENANT_ID || 'fitstn';
-const DAY_NAMES   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const PKG_ORDER   = ['Fit Solo Pro','Fit Fam Pro','Fit Solo','Fit Duo','Fit Fam','Fit Express'];
-
-function isInSLAWindow(msgTime, rule) {
-    const localMs   = msgTime.getTime() + 2 * 3600000;
-    const localDate = new Date(localMs);
-    const localHour = localDate.getUTCHours();
-    const localDay  = localDate.getUTCDay();
-    if (rule.crossMidnight) {
-        return (localHour >= rule.startHour && rule.days.includes(localDay)) || localHour < rule.endHour;
-    }
-    return rule.days.includes(localDay) && localHour >= rule.startHour && localHour < rule.endHour;
-}
+const { SLA_RULES, PKG_ORDER, DAY_NAMES, TENANT_ID, UTC_OFFSET, isInSLAWindow } = require('../constants/sla-rules');
 
 function extractCoachName(room) {
     if (Array.isArray(room.assigned_staff) && room.assigned_staff.length > 0) {
