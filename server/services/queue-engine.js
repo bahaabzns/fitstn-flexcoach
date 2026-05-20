@@ -8,12 +8,14 @@
 
 const { SLA_RULES, TENANT_ID } = require('../constants/sla-rules');
 
-const L1_INTERVAL_MS       = 60_000;
-const L2_INTERVAL_MS       = 60_000;
-const L2_OFFSET_MS         = 30_000;
-const L3_INTERVAL_MS       = 15_000;
-const SNAPSHOT_INTERVAL_MS = 5 * 60_000;
-const MAX_ROOMS_PER_AGENT  = 500;
+const L1_INTERVAL_MS        = 60_000;
+const L2_INTERVAL_MS        = 60_000;
+const L2_OFFSET_MS          = 30_000;
+const L3_INTERVAL_MS        = 15_000;
+const SNAPSHOT_INTERVAL_MS  = 5 * 60_000;
+const FLOW_INTERVAL_MS      = 5 * 60_000;   // persist flow metrics every 5 min
+const FLOW_WINDOW_MINUTES   = 30;
+const MAX_ROOMS_PER_AGENT   = 500;
 
 // Priority score weights: [PackagePriority, TTB_Urgency, AgingPenalty, PremiumBoost, ReopenPenalty]
 const DEFAULT_WEIGHTS = [0.20, 0.40, 0.15, 0.20, 0.05];
@@ -44,6 +46,9 @@ class QueueEngine {
         this._ttbState    = null;        // latest TTB counts
         this._weights     = [...DEFAULT_WEIGHTS];
 
+        // Flow metrics — rolling 30-min window counters
+        this._flowWindow = { newRooms: 0, resolved: 0, startedAt: Date.now() };
+
         // Growth-rate ring buffer (last 30 L1 polls ≈ 30 min)
         this._history = [];
 
@@ -55,6 +60,7 @@ class QueueEngine {
         this._l2Timer       = null;
         this._l3Timer       = null;
         this._snapshotTimer = null;
+        this._flowTimer     = null;
     }
 
     start() {
@@ -68,12 +74,13 @@ class QueueEngine {
 
         this._l3Timer       = setInterval(() => this._runL3(), L3_INTERVAL_MS);
         this._snapshotTimer = setInterval(() => this._runSnapshot(), SNAPSHOT_INTERVAL_MS);
+        this._flowTimer     = setInterval(() => this._persistFlowMetrics(), FLOW_INTERVAL_MS);
 
-        console.log('[QueueEngine] started — L1: 60s, L2: 60s+30s, L3: 15s');
+        console.log('[QueueEngine] started — L1: 60s, L2: 60s+30s, L3: 15s, flow: 5m');
     }
 
     stop() {
-        [this._l1Timer, this._l2Timer, this._l3Timer, this._snapshotTimer]
+        [this._l1Timer, this._l2Timer, this._l3Timer, this._snapshotTimer, this._flowTimer]
             .forEach(t => t && clearInterval(t));
     }
 
@@ -81,6 +88,26 @@ class QueueEngine {
 
     getState()    { return this.state; }
     getTtbState() { return this._ttbState; }
+
+    getFlowMetrics() {
+        const elapsedMs   = Date.now() - this._flowWindow.startedAt;
+        const elapsedHrs  = elapsedMs / 3_600_000;
+        const openCount   = [...this._roomCache.values()].filter(r => r.state !== 'RESOLVED').length;
+        const intakeRate  = elapsedHrs > 0 ? Math.round((this._flowWindow.newRooms  / elapsedHrs) * 10) / 10 : 0;
+        const resolveRate = elapsedHrs > 0 ? Math.round((this._flowWindow.resolved  / elapsedHrs) * 10) / 10 : 0;
+        const resolvePerMin = resolveRate / 60;
+        return {
+            new_rooms_in_window:      this._flowWindow.newRooms,
+            resolved_in_window:       this._flowWindow.resolved,
+            window_minutes:           Math.round(elapsedMs / 60_000),
+            intake_rate_per_hour:     intakeRate,
+            resolution_rate_per_hour: resolveRate,
+            net_growth_per_hour:      Math.round((intakeRate - resolveRate) * 10) / 10,
+            total_open:               openCount,
+            drain_time_minutes:       (resolvePerMin > 0) ? Math.round(openCount / resolvePerMin) : null,
+            computed_at:              new Date().toISOString(),
+        };
+    }
 
     getRooms({ agentId, packageName, state, limit = 200 } = {}) {
         let rooms = [...this._roomCache.values()].filter(r => r.state !== 'RESOLVED');
@@ -318,6 +345,7 @@ class QueueEngine {
                     priority_score:     Math.round(priorityScore * 1000) / 1000,
                     state,
                 };
+                if (!this._roomCache.has(roomId)) this._flowWindow.newRooms++;
                 this._roomCache.set(roomId, roomRecord);
                 roomRecords.push(roomRecord);
             }
@@ -395,6 +423,7 @@ class QueueEngine {
         for (const [roomId, room] of this._roomCache) {
             if (!seenRoomIds.has(roomId) && room.state !== 'RESOLVED') {
                 room.state = 'RESOLVED';
+                this._flowWindow.resolved++;
                 this.sql`
                     UPDATE live_queue_rooms
                     SET state = 'RESOLVED', updated_at = NOW()
@@ -486,6 +515,27 @@ class QueueEngine {
         this._persistSnapshot().catch(err =>
             console.error('[QueueEngine] snapshot error:', err.message)
         );
+    }
+
+    async _persistFlowMetrics() {
+        try {
+            const fm = this.getFlowMetrics();
+            await this.sql`
+                INSERT INTO queue_flow_metrics
+                    (captured_at, window_minutes, new_rooms_in_window, resolved_in_window,
+                     intake_rate_per_hour, resolution_rate_per_hour, net_growth_per_hour,
+                     total_open, drain_time_minutes)
+                VALUES
+                    (NOW(), ${fm.window_minutes}, ${fm.new_rooms_in_window},
+                     ${fm.resolved_in_window}, ${fm.intake_rate_per_hour},
+                     ${fm.resolution_rate_per_hour}, ${fm.net_growth_per_hour},
+                     ${fm.total_open}, ${fm.drain_time_minutes})
+            `;
+            // Reset window after persist
+            this._flowWindow = { newRooms: 0, resolved: 0, startedAt: Date.now() };
+        } catch (err) {
+            console.error('[QueueEngine] flow metrics persist:', err.message);
+        }
     }
 
     async _persistSnapshot() {

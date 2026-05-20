@@ -142,10 +142,14 @@ const SlaEngine          = require("./services/sla-engine");
 const AlertEngine        = require("./services/alert-engine");
 const { ForecastingService } = require("./services/forecasting");
 const ExpressScheduler   = require("./services/express-scheduler");
+const { PremiumProtectionService } = require("./services/premium-protection");
 const slaEngine          = new SlaEngine({ sql, supabase, ensureSupabaseAuth, queueEngine, broadcast });
 const alertEngine        = new AlertEngine({ sql, queueEngine, slaEngine, presenceService, broadcast });
 const forecastingService = new ForecastingService({ sql });
 const expressScheduler   = new ExpressScheduler({ sql, supabase, ensureSupabaseAuth, broadcast });
+const premiumProtection  = new PremiumProtectionService({
+    sql, queueEngine, presenceService, isEffectivelyOnShift, isAvailable, broadcast
+});
 
 // CORS: restrict to known clients (dev + production + FlexCoach host page for content scripts)
 const ALLOWED_ORIGINS = [
@@ -230,6 +234,26 @@ app.get("/api/queue/rooms", requireAdmin, async (req, res) => {
         res.json({ rooms: rows, source: "db", total: rows.length });
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch queue rooms", details: err.message });
+    }
+});
+
+// Queue flow metrics — live intake/resolution rates and drain time.
+app.get("/api/queue-flow", requireAdmin, async (req, res) => {
+    try {
+        const live = queueEngine.getFlowMetrics();
+
+        // Append last 12 persisted rows for sparkline
+        const history = await sql`
+            SELECT captured_at, intake_rate_per_hour, resolution_rate_per_hour,
+                   net_growth_per_hour, total_open, drain_time_minutes
+            FROM queue_flow_metrics
+            ORDER BY captured_at DESC
+            LIMIT 12
+        `;
+
+        res.json({ live, history: history.reverse() });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch queue flow metrics", details: err.message });
     }
 });
 
@@ -389,6 +413,211 @@ app.get("/api/sla-risk", requireAdmin, async (req, res) => {
         res.json({ scores: rows, source: "db" });
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch SLA risk scores", details: err.message });
+    }
+});
+
+// Staffing simulator — what-if projection given altered inputs.
+// Query params:
+//   agents_present      integer (default: current on-shift count)
+//   demand_multiplier   float   (default: 1.0 — e.g., 1.3 = +30% demand)
+//   shift_hours         float   (default: 8)
+//   sla_buffer_pct      float   (default: 15)
+app.get("/api/staffing-simulator", requireAdmin, async (req, res) => {
+    try {
+        const { CAPACITY_CONFIG, staffingRequired } = require('./services/forecasting');
+
+        const demandMultiplier = parseFloat(req.query.demand_multiplier ?? 1.0);
+        const shiftHours       = parseFloat(req.query.shift_hours ?? 8);
+        const slaBufferPct     = parseFloat(req.query.sla_buffer_pct ?? 15);
+
+        const queueState    = queueEngine.getState();
+        const agentPresence = await presenceService.getAll();
+        const onShiftNow    = agentPresence.filter(a => isEffectivelyOnShift(a.presence)).length;
+        const agentsPresent = req.query.agents_present != null
+            ? parseInt(req.query.agents_present)
+            : onShiftNow;
+
+        // Current demand per package from queue state + SLA scores
+        const slaScores    = slaEngine.getScores();
+        const baseDemandByPkg = {};
+        for (const s of slaScores) {
+            baseDemandByPkg[s.package_name] = s.pending_count ?? 0;
+        }
+        // If SLA engine hasn't run, fall back to agent totals
+        if (Object.keys(baseDemandByPkg).length === 0) {
+            baseDemandByPkg['all'] = queueState.global_total ?? 0;
+        }
+
+        const results = [];
+        let totalBreachRisk = 0;
+
+        for (const [pkgName, cfg] of Object.entries(CAPACITY_CONFIG)) {
+            if (cfg.isScheduledWorkload) continue;
+
+            const baseDemand    = baseDemandByPkg[pkgName] ?? Math.round((queueState.global_total ?? 0) / 5);
+            const simDemand     = Math.round(baseDemand * demandMultiplier);
+            const agentsNeeded  = staffingRequired(simDemand, shiftHours, pkgName);
+            const utilization   = agentsPresent > 0
+                ? Math.min(2.0, simDemand / Math.max(1,
+                    agentsPresent * (shiftHours * 60 / (cfg.avgHandlingMinutes * cfg.complexityWeight)) * 0.75
+                  )) : 2.0;
+            const slaRisk       = Math.min(100, Math.max(0, (utilization - 0.85) / 0.15 * 30));
+            const breachRisk    = 1 / (1 + Math.exp(-(utilization - 1.0) * 5));
+            totalBreachRisk    += breachRisk * simDemand;
+
+            results.push({
+                package_name:        pkgName,
+                base_demand:         baseDemand,
+                sim_demand:          simDemand,
+                agents_needed:       agentsNeeded,
+                agents_present:      agentsPresent,
+                gap:                 agentsNeeded - agentsPresent,
+                utilization:         Math.round(utilization * 1000) / 1000,
+                utilization_band:    utilization < 0.5 ? 'underutilized'
+                                   : utilization < 0.85 ? 'healthy'
+                                   : utilization < 1.0  ? 'at_capacity'
+                                   : utilization < 1.5  ? 'overloaded'
+                                   : 'critical',
+                sla_risk_pct:        Math.round(slaRisk * 10) / 10,
+                breach_probability:  Math.round(breachRisk * 1000) / 1000,
+            });
+        }
+
+        const totalSimDemand = results.reduce((s, r) => s + r.sim_demand, 0);
+        const expectedBreaches = Math.round(totalBreachRisk * 10) / 10;
+        const overallUtil      = Math.round(
+            results.reduce((s, r) => s + r.utilization, 0) / Math.max(results.length, 1) * 1000
+        ) / 1000;
+
+        res.json({
+            inputs: { agents_present: agentsPresent, demand_multiplier: demandMultiplier, shift_hours: shiftHours, sla_buffer_pct: slaBufferPct },
+            summary: {
+                total_sim_demand:       totalSimDemand,
+                overall_utilization:    overallUtil,
+                expected_breach_count:  expectedBreaches,
+                agents_present:         agentsPresent,
+                agents_needed_total:    results.reduce((s, r) => s + r.agents_needed, 0),
+            },
+            by_package: results,
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to run staffing simulation", details: err.message });
+    }
+});
+
+// Forecast accuracy — MAPE per package from backtesting
+app.get("/api/forecast-accuracy", requireAdmin, async (req, res) => {
+    try {
+        const rows = await sql`
+            SELECT
+                package_name,
+                weekday,
+                COUNT(*)                                            AS n,
+                ROUND(AVG(absolute_pct_error) * 100, 2)            AS mape_pct,
+                ROUND(MIN(absolute_pct_error) * 100, 2)            AS best_pct,
+                ROUND(MAX(absolute_pct_error) * 100, 2)            AS worst_pct,
+                MAX(computed_at)                                    AS last_computed_at
+            FROM forecast_accuracy
+            WHERE computed_at >= NOW() - INTERVAL '14 days'
+            GROUP BY package_name, weekday
+            ORDER BY package_name, weekday
+        `;
+        const models = await sql`
+            SELECT package_name, weekday, model_type, forecast_demand, agents_required,
+                   confidence_low, confidence_high, last_computed_at
+            FROM forecast_models
+            ORDER BY package_name, weekday
+        `;
+        res.json({ accuracy: rows, models });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch forecast accuracy", details: err.message });
+    }
+});
+
+// Premium escalations — recent Pro room escalation log
+app.get("/api/premium-escalations", requireAdmin, async (req, res) => {
+    try {
+        const rows = await sql`
+            SELECT pe.*, a.name AS agent_name
+            FROM premium_escalations pe
+            LEFT JOIN agents a ON pe.assigned_agent_id = a.id
+            ORDER BY pe.escalated_at DESC
+            LIMIT 50
+        `;
+        res.json({ escalations: rows });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch premium escalations", details: err.message });
+    }
+});
+
+// ── Historical Analytics ──────────────────────────────────────────────────────
+// GET /api/analytics/ops-score-trend?days=7
+// Returns daily average Ops Score for the last N days.
+app.get("/api/analytics/ops-score-trend", requireAdmin, async (req, res) => {
+    try {
+        const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 90);
+        const rows = await sql`
+            SELECT
+                DATE(computed_at AT TIME ZONE 'UTC') AS day,
+                ROUND(AVG(ops_score))::int            AS avg_score,
+                MIN(ops_score)::int                  AS min_score,
+                MAX(ops_score)::int                  AS max_score,
+                COUNT(*)::int                        AS samples
+            FROM ops_score_history
+            WHERE computed_at >= NOW() - (${days} || ' days')::INTERVAL
+            GROUP BY DATE(computed_at AT TIME ZONE 'UTC')
+            ORDER BY day ASC
+        `;
+        res.json({ days, trend: rows });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch ops score trend", details: err.message });
+    }
+});
+
+// GET /api/analytics/sla-breach-trend?days=7
+// Returns daily breach counts from the SLA breach ledger, broken down by package.
+app.get("/api/analytics/sla-breach-trend", requireAdmin, async (req, res) => {
+    try {
+        const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 90);
+        const rows = await sql`
+            SELECT
+                DATE(breached_at AT TIME ZONE 'UTC') AS day,
+                package_name,
+                COUNT(*)::int                        AS breach_count
+            FROM sla_breach_ledger
+            WHERE breached_at >= NOW() - (${days} || ' days')::INTERVAL
+            GROUP BY DATE(breached_at AT TIME ZONE 'UTC'), package_name
+            ORDER BY day ASC, package_name
+        `;
+        // Pivot into { day, total, by_package: { pkgName: count } }
+        const byDay = {};
+        for (const r of rows) {
+            const k = String(r.day);
+            if (!byDay[k]) byDay[k] = { day: k, total: 0, by_package: {} };
+            byDay[k].by_package[r.package_name] = Number(r.breach_count);
+            byDay[k].total += Number(r.breach_count);
+        }
+        res.json({ days, trend: Object.values(byDay) });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch breach trend", details: err.message });
+    }
+});
+
+// GET /api/analytics/audit-log?limit=50
+// Returns recent audit log entries.
+app.get("/api/analytics/audit-log", requireAdmin, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+        const rows = await sql`
+            SELECT al.*, a.email AS actor_email
+            FROM audit_log al
+            LEFT JOIN admins a ON al.actor_id = a.id AND al.actor_type = 'admin'
+            ORDER BY al.logged_at DESC
+            LIMIT ${limit}
+        `;
+        res.json({ entries: rows });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch audit log", details: err.message });
     }
 });
 
@@ -2222,6 +2451,71 @@ app.listen(PORT, async () => {
             WHERE state IN ('started','worsening','stable','improving','escalated')
         `;
 
+        // ── Phase 3 schema ────────────────────────────────────────────────────
+        await sql`
+            CREATE TABLE IF NOT EXISTS queue_flow_metrics (
+                id                       BIGSERIAL PRIMARY KEY,
+                captured_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                window_minutes           SMALLINT    NOT NULL DEFAULT 30,
+                new_rooms_in_window      INTEGER     NOT NULL DEFAULT 0,
+                resolved_in_window       INTEGER     NOT NULL DEFAULT 0,
+                intake_rate_per_hour     NUMERIC(8,2),
+                resolution_rate_per_hour NUMERIC(8,2),
+                net_growth_per_hour      NUMERIC(8,2),
+                total_open               INTEGER     NOT NULL DEFAULT 0,
+                drain_time_minutes       INTEGER
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_qfm_time ON queue_flow_metrics(captured_at DESC)`;
+
+        await sql`
+            CREATE TABLE IF NOT EXISTS premium_escalations (
+                id                  BIGSERIAL PRIMARY KEY,
+                escalated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                room_id             TEXT         NOT NULL,
+                package_name        VARCHAR(100) NOT NULL,
+                assigned_agent_id   INTEGER      REFERENCES agents(id),
+                agent_presence      VARCHAR(30),
+                minutes_to_deadline INTEGER      NOT NULL,
+                reason              TEXT
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_pe_time ON premium_escalations(escalated_at DESC)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_pe_room ON premium_escalations(room_id, escalated_at DESC)`;
+
+        await sql`
+            CREATE TABLE IF NOT EXISTS forecast_accuracy (
+                id                   SERIAL PRIMARY KEY,
+                computed_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                package_name         VARCHAR(100) NOT NULL,
+                weekday              SMALLINT     NOT NULL,
+                predicted_demand     INTEGER,
+                actual_demand        INTEGER,
+                absolute_pct_error   NUMERIC(8,4)
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_fa_time ON forecast_accuracy(computed_at DESC)`;
+
+        // ── Phase 4 schema ────────────────────────────────────────────────────
+        // Immutable audit log for all state-changing admin actions
+        await sql`
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id          BIGSERIAL   PRIMARY KEY,
+                logged_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                actor_id    INTEGER,
+                actor_type  VARCHAR(20),
+                action      TEXT        NOT NULL,
+                entity_type VARCHAR(40),
+                entity_id   TEXT,
+                before_val  JSONB,
+                after_val   JSONB,
+                session_id  TEXT
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_time   ON audit_log(logged_at DESC)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_actor  ON audit_log(actor_id, logged_at DESC)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id, logged_at DESC)`;
+
         // Seed default admin
         const existingAdmin = await sql`SELECT id FROM admins WHERE email = 'admin@fitstn.com'`;
         if (existingAdmin.length === 0) {
@@ -2283,6 +2577,9 @@ app.listen(PORT, async () => {
 
         // Express scheduler — snapshots Fit Express rooms daily at 11:00 local
         expressScheduler.start();
+
+        // Premium protection — watches Pro rooms with < 30m to deadline, escalates if agent is idle/off-shift
+        premiumProtection.start();
 
         console.log("Database schema ready.");
     } catch (err) {

@@ -1,4 +1,5 @@
 const express = require('express');
+const { writeAudit } = require('../utils/audit-log');
 
 module.exports = function (sql, requireAdmin) {
     const router = express.Router();
@@ -44,7 +45,17 @@ module.exports = function (sql, requireAdmin) {
             `;
 
             if (result.length === 0) return res.status(404).json({ error: 'Alert not found' });
-            res.json({ success: true, alert: result[0] });
+            const alert = result[0];
+            writeAudit(sql, {
+                actorId:    req.user.id,
+                actorType:  'admin',
+                action:     'acknowledge_alert',
+                entityType: 'alert',
+                entityId:   alertId,
+                before:     { is_acknowledged: false },
+                after:      { is_acknowledged: true, alert_type: alert.alert_type, title: alert.title },
+            });
+            res.json({ success: true, alert });
         } catch (err) {
             res.status(500).json({ error: 'Failed to acknowledge alert', details: err.message });
         }

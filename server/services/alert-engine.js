@@ -7,7 +7,10 @@
 
 const crypto = require('crypto');
 
-const ALERT_INTERVAL_MS = 5 * 60 * 1000;
+const ALERT_INTERVAL_MS   = 5 * 60 * 1000;
+const BASELINE_CACHE_MS   = 55 * 60 * 1000;  // re-query DB at most once per hour
+const ANOMALY_Z_ALERT     = 3.0;             // |z| threshold to fire an alert
+const ANOMALY_Z_WARN      = 2.0;             // |z| threshold to log only
 
 // State machine transitions:
 //   started → worsening | stable | improving
@@ -61,6 +64,10 @@ const COOLDOWN_KEY = {
     queue_overload:      'alert.cooldown.queue_overload_min',
     inactive_agent:      'alert.cooldown.inactive_agent_min',
     workload_imbalance:  'alert.cooldown.workload_imbalance_min',
+    anomaly_high:        'alert.cooldown.queue_overload_min',
+    breach_cluster:      'alert.cooldown.queue_overload_min',  // 10-min cooldown
+    client_surge:        'alert.cooldown.queue_overload_min',  // 10-min cooldown
+    agent_burnout:       'alert.cooldown.agent_overload_min',  // 15-min cooldown
 };
 const ESCALATE_KEY = {
     sla_danger:          'alert.escalate.sla_danger_min',
@@ -82,6 +89,12 @@ class AlertEngine {
 
         // Config cache (reloaded every run)
         this._cfg = { ...DEFAULTS };
+
+        // Anomaly baseline cache: key "wd:h" → { mean, stdDev, cachedAt }
+        this._baselineCache = new Map();
+
+        // Burnout tracking: agent_id → { firstSeen: Date, lastPending: number }
+        this._burnoutTracking = new Map();
     }
 
     start() {
@@ -108,7 +121,11 @@ class AlertEngine {
         const slaScores  = this.slaEngine.getScores();
         const agents     = await this._agentStatuses();
 
-        const candidates = this._buildCandidates(queueState, slaScores, agents);
+        const anomalyCandidates = await this._buildAnomalyCandidates(queueState, agents);
+        const candidates = [
+            ...this._buildCandidates(queueState, slaScores, agents),
+            ...anomalyCandidates,
+        ];
 
         const seenFps = new Set();
         let transitions = 0;
@@ -401,6 +418,175 @@ class AlertEngine {
         } catch {
             // Table may not exist on very first startup before schema runs; use defaults
         }
+    }
+
+    // Composite anomaly detection: queue spike, breach cluster, client surge, agent burnout.
+    async _buildAnomalyCandidates(queueState, agents = []) {
+        const results = [];
+        await Promise.all([
+            this._queueSpikeCandidate(queueState).then(r => results.push(...r)),
+            this._breachClusterCandidates().then(r => results.push(...r)),
+            this._clientSurgeCandidates().then(r => results.push(...r)),
+        ]);
+        results.push(...this._agentBurnoutCandidates(queueState));
+        return results;
+    }
+
+    // Z-score anomaly on global queue total vs 8-week historical baseline.
+    async _queueSpikeCandidate(queueState) {
+        try {
+            const now      = new Date();
+            const weekday  = now.getDay();
+            const hour     = now.getHours();
+            const cacheKey = `${weekday}:${hour}`;
+
+            let baseline = this._baselineCache.get(cacheKey);
+            if (!baseline || (Date.now() - baseline.cachedAt) > BASELINE_CACHE_MS) {
+                const rows = await this.sql`
+                    SELECT pending_count
+                    FROM queue_snapshots
+                    WHERE agent_id IS NULL
+                      AND EXTRACT(DOW  FROM snapshot_at) = ${weekday}
+                      AND EXTRACT(HOUR FROM snapshot_at) = ${hour}
+                      AND snapshot_at >= NOW() - INTERVAL '56 days'
+                    ORDER BY snapshot_at DESC
+                `;
+                if (rows.length < 4) return [];
+
+                const series = rows.map(r => Number(r.pending_count));
+                const mean   = series.reduce((s, x) => s + x, 0) / series.length;
+                const stdDev = Math.sqrt(
+                    series.reduce((s, x) => s + (x - mean) ** 2, 0) / (series.length - 1)
+                );
+                baseline = { mean, stdDev, cachedAt: Date.now(), samples: series.length };
+                this._baselineCache.set(cacheKey, baseline);
+            }
+
+            if (baseline.stdDev < 1) return [];
+
+            const current = queueState.global_total ?? 0;
+            const z       = (current - baseline.mean) / baseline.stdDev;
+
+            if (Math.abs(z) < ANOMALY_Z_WARN) return [];
+
+            const direction = z > 0 ? 'higher' : 'lower';
+            if (Math.abs(z) < ANOMALY_Z_ALERT) {
+                console.log(
+                    `[AlertEngine/Anomaly] queue z=${z.toFixed(2)} (${direction} than baseline ${Math.round(baseline.mean)} ±${Math.round(baseline.stdDev)})`
+                );
+                return [];
+            }
+
+            return [{
+                alert_type:       'anomaly_high',
+                severity:         z > 5 ? 'critical' : 'warning',
+                title:            `Queue volume anomaly (z=${z.toFixed(1)})`,
+                body:             `Global queue is ${Math.round(Math.abs(z))}σ ${direction} than baseline for this hour. Current: ${current}, baseline: ~${Math.round(baseline.mean)} (n=${baseline.samples}).`,
+                package_name:     null,
+                agent_id:         null,
+                metric_value:     current,
+                metric_threshold: Math.round(baseline.mean + ANOMALY_Z_ALERT * baseline.stdDev),
+            }];
+        } catch (err) {
+            console.error('[AlertEngine/Anomaly/QueueSpike] error:', err.message);
+            return [];
+        }
+    }
+
+    // Detect 3+ new SLA breaches in the last 10 minutes.
+    async _breachClusterCandidates() {
+        try {
+            const rows = await this.sql`
+                SELECT COUNT(*)::int AS count
+                FROM sla_breach_ledger
+                WHERE breached_at >= NOW() - INTERVAL '10 minutes'
+            `;
+            const count = rows[0]?.count ?? 0;
+            if (count < 3) return [];
+            return [{
+                alert_type:       'breach_cluster',
+                severity:         count >= 6 ? 'critical' : 'warning',
+                title:            `SLA breach cluster: ${count} breaches in 10 min`,
+                body:             `${count} rooms breached SLA in the last 10 minutes. Immediate action required.`,
+                package_name:     null,
+                agent_id:         null,
+                metric_value:     count,
+                metric_threshold: 3,
+            }];
+        } catch (err) {
+            console.error('[AlertEngine/Anomaly/BreachCluster] error:', err.message);
+            return [];
+        }
+    }
+
+    // Detect client surge: incoming rate in current hour > 2× previous hour.
+    async _clientSurgeCandidates() {
+        try {
+            const rows = await this.sql`
+                SELECT snapshot_hour, SUM(incoming_count)::int AS incoming
+                FROM hourly_demand_snapshots
+                WHERE snapshot_date = CURRENT_DATE
+                  AND snapshot_hour IN (
+                      EXTRACT(HOUR FROM NOW())::int,
+                      EXTRACT(HOUR FROM NOW())::int - 1
+                  )
+                GROUP BY snapshot_hour
+                ORDER BY snapshot_hour DESC
+            `;
+            if (rows.length < 2) return [];
+            const curr = Number(rows[0].incoming);
+            const prev = Number(rows[1].incoming);
+            if (prev < 5 || curr <= prev * 2) return [];  // prev too small or no surge
+            const ratio = Math.round((curr / prev) * 10) / 10;
+            return [{
+                alert_type:       'client_surge',
+                severity:         ratio >= 3 ? 'critical' : 'warning',
+                title:            `Client surge: ${ratio}× incoming rate`,
+                body:             `Current hour: ${curr} incoming vs ${prev} prior hour (${ratio}× increase). Staff up immediately.`,
+                package_name:     null,
+                agent_id:         null,
+                metric_value:     ratio,
+                metric_threshold: 2.0,
+            }];
+        } catch (err) {
+            console.error('[AlertEngine/Anomaly/ClientSurge] error:', err.message);
+            return [];
+        }
+    }
+
+    // Detect agent burnout: pending_count > 25 sustained for 45+ minutes.
+    _agentBurnoutCandidates(queueState) {
+        const BURNOUT_PENDING  = 25;
+        const BURNOUT_MIN      = 45;
+        const now              = Date.now();
+        const results          = [];
+
+        for (const a of queueState.byAgent ?? []) {
+            if (a.pending_count > BURNOUT_PENDING) {
+                if (!this._burnoutTracking.has(a.agent_id)) {
+                    this._burnoutTracking.set(a.agent_id, { firstSeen: now, lastPending: a.pending_count });
+                } else {
+                    this._burnoutTracking.get(a.agent_id).lastPending = a.pending_count;
+                }
+                const { firstSeen } = this._burnoutTracking.get(a.agent_id);
+                const sustainedMin  = (now - firstSeen) / 60_000;
+                if (sustainedMin >= BURNOUT_MIN) {
+                    results.push({
+                        alert_type:       'agent_burnout',
+                        severity:         sustainedMin >= 90 ? 'critical' : 'warning',
+                        title:            `${a.agent_name} burnout risk (${Math.round(sustainedMin)}m overloaded)`,
+                        body:             `${a.agent_name} has had ${a.pending_count} pending chats for ${Math.round(sustainedMin)} minutes. Reassign to prevent burnout.`,
+                        package_name:     null,
+                        agent_id:         a.agent_id,
+                        metric_value:     Math.round(sustainedMin),
+                        metric_threshold: BURNOUT_MIN,
+                    });
+                }
+            } else {
+                this._burnoutTracking.delete(a.agent_id);
+            }
+        }
+        return results;
     }
 
     async _agentStatuses() {
