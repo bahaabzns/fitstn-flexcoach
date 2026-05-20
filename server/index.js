@@ -188,56 +188,175 @@ app.get("/api/queue-state", requireAdmin, (req, res) => {
     res.json(queueEngine.getState());
 });
 
-// Operational health score — composite of queue pressure, staffing, load, and SLA.
-// Uses PresenceService for authoritative multi-signal agent state (fixes D1).
+// Live queue room drilldown — sortable, filterable view of live_queue_rooms.
+// In-memory fast path; falls back to DB when cache is cold.
+app.get("/api/queue/rooms", requireAdmin, async (req, res) => {
+    try {
+        const { package: pkgName, state, limit = "200" } = req.query;
+        const agentId  = req.query.agent_id ? parseInt(req.query.agent_id) : undefined;
+        const limitNum = Math.min(parseInt(limit) || 200, 500);
+
+        const cached = queueEngine.getRooms({ agentId, packageName: pkgName, state, limit: limitNum });
+        if (cached.length > 0) {
+            const withAge = cached.map(r => ({
+                ...r,
+                minutes_since_client_msg: Math.round((Date.now() - new Date(r.last_client_msg_at).getTime()) / 60_000),
+                minutes_to_deadline: Math.round((new Date(r.sla_deadline_at).getTime() - Date.now()) / 60_000),
+            }));
+            return res.json({ rooms: withAge, source: "live", total: withAge.length });
+        }
+
+        // DB fallback when engine cache is cold
+        const agentIdParam  = agentId  ?? null;
+        const pkgNameParam  = pkgName  ?? null;
+        const stateParam    = state    ?? null;
+        const rows = await sql`
+            SELECT lqr.room_id, lqr.package_name, lqr.assigned_agent_id,
+                   lqr.client_name, lqr.last_client_msg_at, lqr.last_staff_msg_at,
+                   lqr.sla_deadline_at, lqr.priority_score, lqr.state,
+                   lqr.state_changed_at, lqr.first_seen_at, lqr.updated_at,
+                   a.name AS agent_name,
+                   EXTRACT(EPOCH FROM (NOW() - lqr.last_client_msg_at)) / 60 AS minutes_since_client_msg,
+                   EXTRACT(EPOCH FROM (lqr.sla_deadline_at - NOW())) / 60   AS minutes_to_deadline
+            FROM live_queue_rooms lqr
+            LEFT JOIN agents a ON lqr.assigned_agent_id = a.id
+            WHERE lqr.state <> 'RESOLVED'
+              AND (${agentIdParam}::int  IS NULL OR lqr.assigned_agent_id = ${agentIdParam}::int)
+              AND (${pkgNameParam}::text IS NULL OR lqr.package_name       = ${pkgNameParam}::text)
+              AND (${stateParam}::text   IS NULL OR lqr.state              = ${stateParam}::text)
+            ORDER BY lqr.priority_score DESC
+            LIMIT ${limitNum}
+        `;
+        res.json({ rooms: rows, source: "db", total: rows.length });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch queue rooms", details: err.message });
+    }
+});
+
+// Ops Score v2 — 6-pillar explainable composite with per-pillar confidence.
+// Pillars: SLA Health (40%), Queue Pressure (20%), Staffing Match (15%),
+//          Workload Evenness (10%), Premium Risk (10%), Breach Burndown (5%).
 app.get("/api/ops-health", requireAdmin, async (req, res) => {
     try {
-        const queueState   = queueEngine.getState();
+        const now           = new Date();
+        const queueState    = queueEngine.getState();
         const agentPresence = await presenceService.getAll();
+        const ttbState      = queueEngine.getTtbState();
 
-        const totalAgents  = agentPresence.length;
-        const onShift      = agentPresence.filter(a => isEffectivelyOnShift(a.presence)).length;
-        const inSession    = agentPresence.filter(a => a.presence === 'IN_SESSION').length;
-        const globalTotal  = queueState.global_total    || 0;
-        const growthRate   = queueState.global_growth_rate || 0;
+        const totalAgents = agentPresence.length;
+        const onShift     = agentPresence.filter(a => isEffectivelyOnShift(a.presence)).length;
+        const inSession   = agentPresence.filter(a => a.presence === 'IN_SESSION').length;
+        const globalTotal = queueState.global_total    || 0;
+        const growthRate  = queueState.global_growth_rate || 0;
 
-        // Queue health: penalised by pending load and positive growth rate
+        // ── Pillar 1: SLA Health (40%) ────────────────────────────────────────
+        // 100 - max(0, 95 - min_projected_sla_eod)  [penalises only when below 95% target]
+        const slaScores = slaEngine.getScores().filter(s => s.projected_sla_eod != null);
+        const slaMinEod = slaScores.length > 0
+            ? Math.min(...slaScores.map(s => s.projected_sla_eod)) : 100;
+        const slaHealth = Math.max(0, Math.round(100 - Math.max(0, 95 - slaMinEod)));
+        const slaConf   = Math.min(1, slaScores.length / 5);  // 5 live packages
+
+        // ── Pillar 2: Queue Pressure (20%) ───────────────────────────────────
         const queueLoad     = Math.min(1, globalTotal / Math.max(onShift * 15, 1));
-        const growthPenalty = growthRate > 0 ? Math.min(30, growthRate * 3) : 0;
-        const queueHealth   = Math.max(0, Math.round(100 - queueLoad * 70 - growthPenalty));
+        const growthPressure = Math.max(0, growthRate * 5);
+        const queuePressure = Math.max(0, Math.round(100 - queueLoad * 70 - growthPressure));
+        const queueConf     = queueState.capturedAt ? 1.0 : 0.3;
 
-        // Staffing health: fraction of agents effectively on shift
-        const staffingHealth = totalAgents > 0 ? Math.round((onShift / totalAgents) * 100) : 100;
-
-        // Load health: agents with >20 pending chats are considered overloaded
-        const byAgent    = queueState.byAgent ?? [];
-        const overloaded = byAgent.filter(a => a.pending_count > 20).length;
-        const loadHealth = byAgent.length > 0
-            ? Math.max(0, Math.round(100 - (overloaded / byAgent.length) * 100))
-            : 100;
-
-        // SLA health from SlaEngine
-        const slaScores  = slaEngine.getScores().filter(s => s.projected_sla_eod != null);
-        const slaHealth  = slaScores.length > 0
-            ? Math.round(Math.min(...slaScores.map(s => s.projected_sla_eod)))
-            : 100;
-
-        const opsScore = Math.round(
-            slaHealth      * 0.40 +
-            queueHealth    * 0.30 +
-            staffingHealth * 0.15 +
-            loadHealth     * 0.15
+        // ── Pillar 3: Staffing Match (15%) ───────────────────────────────────
+        // Required agents estimated from SLA engine agents_needed sum (with floor = onShift)
+        const agentsRequired = Math.max(1,
+            slaScores.reduce((s, r) => s + (r.agents_needed || 0), 0) || onShift
         );
+        const staffingMatch = Math.round(100 * Math.min(1, onShift / agentsRequired));
+        const staffingConf  = 0.8;
 
-        // Presence breakdown (exposes richer state to frontend)
+        // ── Pillar 4: Workload Evenness (10%) ────────────────────────────────
+        const capacityConfig = await sql`
+            SELECT complexity_weight, avg_handling_minutes, max_concurrent_chats
+            FROM agent_capacity_config WHERE is_scheduled_workload = FALSE
+        `;
+        const totalCfgWeight = capacityConfig.reduce((s, r) => s + parseFloat(r.complexity_weight), 0);
+        const weightedCapHr  = totalCfgWeight > 0
+            ? capacityConfig.reduce((s, r) => {
+                const cap = (60 / parseFloat(r.avg_handling_minutes)) * parseFloat(r.max_concurrent_chats);
+                return s + cap * parseFloat(r.complexity_weight) / totalCfgWeight;
+            }, 0) : 6;
+        const avgComplexity = totalCfgWeight > 0 ? totalCfgWeight / capacityConfig.length : 1.0;
+        const byAgentQueue  = Object.fromEntries((queueState.byAgent || []).map(a => [a.agent_id, a]));
+
+        const onShiftRatios = agentPresence
+            .filter(a => isEffectivelyOnShift(a.presence))
+            .map(a => {
+                const pending     = byAgentQueue[a.id]?.pending_count ?? 0;
+                const shiftEndDt  = new Date(now);
+                shiftEndDt.setHours(19, 0, 0, 0);
+                const hoursLeft   = Math.max(0, (shiftEndDt - now) / 3_600_000);
+                const pace        = hoursLeft > 0 ? pending / hoursLeft : pending;
+                return weightedCapHr > 0 ? (pace * avgComplexity) / weightedCapHr : 0;
+            });
+        const gini         = computeGini(onShiftRatios);
+        const workloadEven = Math.round(100 * (1 - gini));
+        const workloadConf = onShiftRatios.length >= 2 ? 1.0 : 0.5;
+
+        // ── Pillar 5: Premium Risk (10%) ─────────────────────────────────────
+        let premiumRisk = 100, premiumConf = 0.3;
+        const proRooms  = queueEngine.getRooms({ limit: 1000 }).filter(r => r.package_name.includes('Pro'));
+        if (proRooms.length > 0) {
+            const proSafe = proRooms.filter(r => r.state === 'OPEN').length;
+            premiumRisk   = Math.round(100 * proSafe / proRooms.length);
+            premiumConf   = 1.0;
+        } else if (ttbState) {
+            premiumConf = 0.6;  // L3 running but no Pro rooms
+        }
+
+        // ── Pillar 6: Breach Burndown (5%) ───────────────────────────────────
+        let breachBurndown = 100, breachConf = 0.3;
+        if (ttbState) {
+            const atRisk30  = ttbState.breaching_now + ttbState.breaching_30m;
+            const totalOpen = Math.max(ttbState.total_open, 1);
+            breachBurndown  = Math.round(100 * (1 - atRisk30 / totalOpen));
+            breachConf      = 1.0;
+        }
+
+        // ── Composite OpsScore ────────────────────────────────────────────────
+        const pillars = [
+            { key: "sla_health",      label: "SLA Health",        value: slaHealth,      weight: 0.40, confidence: slaConf,      explain: `Min projected EOD SLA: ${slaMinEod.toFixed(1)}% (target 95%)` },
+            { key: "queue_pressure",  label: "Queue Pressure",    value: queuePressure,  weight: 0.20, confidence: queueConf,    explain: `${globalTotal} pending, growth ${growthRate > 0 ? "+" : ""}${growthRate}/hr` },
+            { key: "staffing_match",  label: "Staffing Match",    value: staffingMatch,  weight: 0.15, confidence: staffingConf, explain: `${onShift} on shift, ~${agentsRequired} required` },
+            { key: "workload_even",   label: "Workload Evenness", value: workloadEven,   weight: 0.10, confidence: workloadConf, explain: `Gini ${gini.toFixed(3)} (0=perfect, 1=worst)` },
+            { key: "premium_risk",    label: "Premium Risk",      value: premiumRisk,    weight: 0.10, confidence: premiumConf,  explain: `${proRooms.filter(r => r.state === 'OPEN').length}/${proRooms.length} Pro rooms safe` },
+            { key: "breach_burndown", label: "Breach Burndown",   value: breachBurndown, weight: 0.05, confidence: breachConf,   explain: ttbState ? `${ttbState.breaching_now} breached, ${ttbState.breaching_30m} at risk <30m` : "L2 not yet run" },
+        ];
+
+        const rawScore    = Math.round(pillars.reduce((s, p) => s + p.value * p.weight, 0));
+        const overallConf = harmonicMean(pillars.map(p => p.confidence));
+        const opsScore    = Math.round(rawScore * (0.5 + 0.5 * overallConf));
+
+        // Presence breakdown
         const presenceBreakdown = agentPresence.reduce((acc, a) => {
             acc[a.presence] = (acc[a.presence] || 0) + 1;
             return acc;
         }, {});
 
+        // Persist to ops_score_history (fire-and-forget)
+        sql`
+            INSERT INTO ops_score_history (computed_at, ops_score, confidence, pillars)
+            VALUES (NOW(), ${opsScore}, ${Math.round(overallConf * 1000) / 1000}, ${JSON.stringify(pillars)}::jsonb)
+        `.catch(err => console.error('ops_score_history write:', err.message));
+
         res.json({
             opsScore,
-            components: { slaHealth, queueHealth, staffingHealth, loadHealth },
+            confidence: Math.round(overallConf * 100) / 100,
+            pillars,
+            components: {
+                // v2 names
+                slaHealth, queuePressure, staffingMatch, workloadEven, premiumRisk, breachBurndown,
+                // legacy aliases for backward-compat
+                queueHealth:    queuePressure,
+                staffingHealth: staffingMatch,
+                loadHealth:     workloadEven,
+            },
             summary: {
                 agentsOnShift:   onShift,
                 agentsInSession: inSession,
@@ -246,6 +365,7 @@ app.get("/api/ops-health", requireAdmin, async (req, res) => {
                 queueGrowthRate: growthRate,
             },
             presenceBreakdown,
+            ttb: ttbState,
         });
     } catch (err) {
         res.status(500).json({ error: "Failed to compute ops health", details: err.message });
@@ -1091,6 +1211,13 @@ function computeGini(values) {
         for (let j = 0; j < n; j++)
             sumDiff += Math.abs(sorted[i] - sorted[j]);
     return sumDiff / (2 * n * n * mean);
+}
+
+function harmonicMean(values) {
+    const positive = values.filter(v => v > 0);
+    if (positive.length === 0) return 0.3;
+    const sumRecip = positive.reduce((s, v) => s + 1 / v, 0);
+    return positive.length / sumRecip;
 }
 
 // ── Reassignment Recommendations ─────────────────────────────────────────
