@@ -1,1322 +1,1170 @@
-Real-Time Operations Management System
-Architectural Specification — FitStn FollowUp RTM
-CURRENT STATE ASSESSMENT
-Before designing, here is what the existing system does well and where it falls short:
+# FitStn Real-Time Operations Management System
+## Enterprise-Grade Implementation Plan
 
-Strengths to preserve:
+> **Audience:** Workforce Management Architect, Support Operations Engineer, Enterprise Dashboard Designer
+> **Scope:** Online fitness coaching follow-up team — SLA-critical, multi-tier support
+> **Date:** 2026-05-17
 
-Supabase RPC integration for live pending counts (get_chat_rooms_paginated)
-Gap-based idle calculation (accurate, not event-dependent)
-Hourly demand snapshots table (solid foundation)
-Per-package SLA rule engine in demand-report.js
-Per-agent workload ratio (required_pace / max_chats_per_hour)
-Critical gaps this design addresses:
+---
 
-No real-time queue state — only historical snapshots
-No SLA risk prediction — only backward-looking SLA rate
-Utilization inflated: treats all packages equally, ignores concurrency
-No operational alerts — managers must manually watch numbers
-Fit Express treated identically to live packages (it should not be)
-No agent fairness/balance metric
-No what-if forecasting
-No push mechanism — everything is manual refresh or polling
-Dashboard is pure analytics, no actionable operations layer
-PART 1: NEW DASHBOARD ARCHITECTURE
-1.1 Page Structure
-Replace the single demand-report.html monolith with a tabbed Operations Command Center hosted in a new ops-center.html. The existing pages (dashboard.html, demand-report.html) remain unchanged for backward compatibility.
+## Table of Contents
 
+1. [System Architecture Review](#1-system-architecture-review)
+2. [Operations Logic Design](#2-operations-logic-design)
+3. [Utilization Model](#3-utilization-model)
+4. [Queue Engine Design](#4-queue-engine-design)
+5. [Alert Engine Design](#5-alert-engine-design)
+6. [Ops Score Engine](#6-ops-score-engine)
+7. [Real-Time System Design](#7-real-time-system-design)
+8. [Database Design](#8-database-design)
+9. [UI/UX Redesign Plan](#9-uiux-redesign-plan)
+10. [Advanced Operational Features](#10-advanced-operational-features)
+11. [Implementation Roadmap](#11-implementation-roadmap)
+12. [Enterprise-Grade Improvements](#12-enterprise-grade-improvements)
 
-/ops-center.html          ← New real-time command center
-/demand-report.html       ← Existing (kept, will be extended)
-/dashboard.html           ← Existing agent status view (kept)
-1.2 Layout Hierarchy
+---
 
-┌─────────────────────────────────────────────────────────────────┐
-│  STICKY ALERT BAR  [Critical alerts only, auto-dismiss]         │
-├─────────────────────────────────────────────────────────────────┤
-│  STICKY KPI HEADER                                              │
-│  [Ops Score] [SLA Health] [Queue Depth] [Agents Online]         │
-│  [Burnout Risk] [Premium Risk]  ·  Last updated: 00:23 ago      │
-├──────────┬──────────────────────────────────────────────────────┤
-│          │                                                       │
-│  LEFT    │  MAIN CONTENT AREA                                    │
-│  NAV     │                                                       │
-│  RAIL    │  Tab: LIVE OPS  │  SLA ENGINE  │  AGENTS  │  PLAN    │
-│          │                                                       │
-│  [Live]  │  ┌─────────────────────┐  ┌────────────────────┐    │
-│  [SLA]   │  │  QUEUE MONITOR      │  │  EXEC SUMMARY      │    │
-│  [Agent] │  └─────────────────────┘  └────────────────────┘    │
-│  [Plan]  │  ┌─────────────────────────────────────────────┐    │
-│  [Alert] │  │  PACKAGE QUEUE BREAKDOWN (with severity)    │    │
-│  [Hist]  │  └─────────────────────────────────────────────┘    │
-│          │  ┌─────────────────────────────────────────────┐    │
-│          │  │  HOURLY DEMAND HEATMAP                       │    │
-│          │  └─────────────────────────────────────────────┘    │
-│          │  ┌─────────────────────┐  ┌────────────────────┐    │
-│          │  │  AGENT LIVE GRID    │  │  ALERTS FEED       │    │
-│          │  └─────────────────────┘  └────────────────────┘    │
-└──────────┴──────────────────────────────────────────────────────┘
-1.3 Tab Definitions
-Tab	Content
-Live Ops	Queue monitor, exec summary, agent grid, alerts feed
-SLA Engine	Risk scores by package, projected SLA charts, breach predictions
-Agent Ops	Deep agent management: occupancy, fairness, reassignment
-Planning	Hourly heatmaps, staffing charts, forecasting, what-if simulator
-Alert Log	Full historical alerts with filters
-History	Legacy analytics (merged from demand-report.html)
-PART 2: DATABASE SCHEMA IMPROVEMENTS
-2.1 New Tables
-queue_state
-Stores the most recent real-time queue poll per package. Replaces the need to query Supabase in every dashboard request.
+## 1. System Architecture Review
 
+### 1.1 Current Architectural Weaknesses
 
-CREATE TABLE queue_state (
-    id                    SERIAL PRIMARY KEY,
-    captured_at           TIMESTAMP NOT NULL DEFAULT NOW(),
-    package_name          VARCHAR(100) NOT NULL,
-    pending_count         INTEGER NOT NULL DEFAULT 0,
-    oldest_pending_at     TIMESTAMP,
-    avg_wait_minutes      NUMERIC(8,2),
-    near_sla_breach_count INTEGER NOT NULL DEFAULT 0,
-    -- "near breach" = waiting > 75% of package SLA window
-    sla_breach_threshold_pct NUMERIC(5,2) DEFAULT 75.0,
-    UNIQUE(captured_at, package_name)
-);
+| Layer | Weakness | Risk Level |
+|---|---|---|
+| Shift Detection | No real-time shift boundary evaluation — agents on shift derived from static schedule lookup | CRITICAL |
+| Utilization | Chat count used as a proxy for workload — ignores package weight, SLA age, and concurrency | CRITICAL |
+| Alert Engine | Stateless — re-fires identical alerts on every polling cycle | HIGH |
+| Queue State | No persistent queue state — queue rebuilt from scratch on every request | HIGH |
+| Ops Score | No transparent formula — score appears to be an arbitrary aggregation | HIGH |
+| Data Freshness | Polling-based — stale windows between polls allow silent SLA breaches | MEDIUM |
+| Forecasting | No time-series model — predictions are static thresholds not demand curves | MEDIUM |
+| Audit Trail | No event log — operational decisions are unverifiable after the fact | MEDIUM |
 
-CREATE INDEX idx_queue_state_captured ON queue_state(captured_at DESC);
-queue_snapshots
-Time-series of queue_state for growth rate calculation.
+### 1.2 Scaling Risks
 
+- **Single polling loop:** All dashboards poll the same endpoints independently. At 10 concurrent admin sessions, the server executes 10x redundant DB queries per cycle.
+- **No queue partitioning:** A single queue table scan on every refresh becomes expensive as conversation volume grows.
+- **No caching layer:** Every metric recalculated from raw data on demand — no materialized intermediate state.
+- **Shift logic tightly coupled to display layer:** Shift boundary logic lives in the frontend or mixed in route handlers rather than a dedicated service.
 
-CREATE TABLE queue_snapshots (
-    id             SERIAL PRIMARY KEY,
-    snapshot_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-    package_name   VARCHAR(100) NOT NULL,
-    pending_count  INTEGER NOT NULL,
-    agent_id       INTEGER REFERENCES agents(id),
-    -- NULL agent_id = aggregate across all agents for package
-    UNIQUE(snapshot_at, package_name, agent_id)
-);
+### 1.3 Operational Blind Spots
 
-CREATE INDEX idx_queue_snapshots_time ON queue_snapshots(snapshot_at DESC);
-sla_risk_scores
-Output of the SLA prediction engine, computed every 15 minutes.
+- No visibility into **time-to-breach** at a per-chat granularity.
+- No **queue velocity** metric — cannot tell if the queue is draining or growing.
+- No **agent concurrency tracking** — how many simultaneous active conversations an agent holds.
+- No **premium tier isolation** — Pro clients not separately monitored; breaches treated equally to Express breaches.
+- No **shift gap detection** — no alarm when agent count drops below minimum coverage threshold.
+- No **SLA breach wave forecasting** — unable to predict "5 breaches arriving in the next 10 minutes."
 
+### 1.4 Target Architecture
 
-CREATE TABLE sla_risk_scores (
-    id                    SERIAL PRIMARY KEY,
-    computed_at           TIMESTAMP NOT NULL DEFAULT NOW(),
-    package_name          VARCHAR(100) NOT NULL,
-    risk_level            VARCHAR(10) NOT NULL CHECK (risk_level IN ('low','medium','high','critical')),
-    risk_score            NUMERIC(5,2) NOT NULL,        -- 0–100
-    current_sla_rate      NUMERIC(5,2),                 -- % so far today
-    projected_sla_1h      NUMERIC(5,2),                 -- projected 1hr from now
-    projected_sla_eod     NUMERIC(5,2),                 -- projected end-of-shift
-    breach_probability    NUMERIC(5,2),                 -- 0–100%
-    predicted_breaches    INTEGER DEFAULT 0,            -- absolute count
-    current_queue         INTEGER DEFAULT 0,
-    projected_queue_1h    INTEGER DEFAULT 0,
-    incoming_rate         NUMERIC(8,2),                 -- chats/hour observed
-    handling_rate         NUMERIC(8,2),                 -- chats/hour current capacity
-    agents_needed         INTEGER DEFAULT 0,
-    UNIQUE(computed_at, package_name)
-);
+```
+┌──────────────────────────────────────────────────────────┐
+│                    CLIENT LAYER                          │
+│  Admin Dashboard │ Ops Center │ Mobile View              │
+└────────────┬─────────────────────────────────────────────┘
+             │ WebSocket (push) + REST (init load)
+┌────────────▼─────────────────────────────────────────────┐
+│                   API GATEWAY (Express)                  │
+│  Auth Middleware │ Rate Limiting │ Request Logging        │
+└────────────┬─────────────────────────────────────────────┘
+             │
+┌────────────▼─────────────────────────────────────────────┐
+│               CORE SERVICES (Node.js)                    │
+│                                                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │ Shift Engine│  │  SLA Engine │  │ Workload Engine  │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │Queue Engine │  │Alert Engine │  │ Forecast Engine  │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │              Ops Score Engine                       │ │
+│  └─────────────────────────────────────────────────────┘ │
+└────────────┬─────────────────────────────────────────────┘
+             │
+┌────────────▼─────────────────────────────────────────────┐
+│                   DATA LAYER (Supabase)                  │
+│  conversations │ agents │ shifts │ alerts │ queue_state  │
+│  sla_events    │ workload_snapshots │ audit_log           │
+└──────────────────────────────────────────────────────────┘
+```
 
-CREATE INDEX idx_sla_risk_time ON sla_risk_scores(computed_at DESC);
-operational_alerts
+---
 
-CREATE TABLE operational_alerts (
-    id              SERIAL PRIMARY KEY,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    severity        VARCHAR(10) NOT NULL CHECK (severity IN ('info','warning','critical')),
-    alert_type      VARCHAR(50) NOT NULL,
-    -- Types: sla_danger, queue_overload, agent_overload, inactive_agent,
-    --        demand_spike, no_reply_risk, premium_sla_risk, staffing_gap,
-    --        burnout_risk, workload_imbalance
-    title           TEXT NOT NULL,
-    body            TEXT,
-    package_name    VARCHAR(100),
-    agent_id        INTEGER REFERENCES agents(id),
-    metric_value    NUMERIC(10,2),       -- the triggering value
-    metric_threshold NUMERIC(10,2),     -- the threshold it crossed
-    is_acknowledged BOOLEAN DEFAULT FALSE,
-    acknowledged_at TIMESTAMP,
-    acknowledged_by INTEGER REFERENCES admins(id),
-    auto_resolved   BOOLEAN DEFAULT FALSE,
-    resolved_at     TIMESTAMP
-);
+## 2. Operations Logic Design
 
-CREATE INDEX idx_alerts_created ON operational_alerts(created_at DESC);
-CREATE INDEX idx_alerts_severity ON operational_alerts(severity, is_acknowledged);
-fit_express_schedule
-Tracks the Fit Express weekly follow-up workload separately from live queue.
+### 2.1 Package Definitions (Source of Truth)
 
-
-CREATE TABLE fit_express_schedule (
-    id               SERIAL PRIMARY KEY,
-    schedule_date    DATE NOT NULL,
-    weekday          SMALLINT NOT NULL,    -- 0=Sun, 1=Mon ... 4=Thu
-    coach_name       VARCHAR(255),
-    total_rooms      INTEGER DEFAULT 0,
-    replied_count    INTEGER DEFAULT 0,
-    pending_count    INTEGER DEFAULT 0,
-    completion_pct   NUMERIC(5,2) DEFAULT 0,
-    created_at       TIMESTAMP DEFAULT NOW(),
-    updated_at       TIMESTAMP DEFAULT NOW(),
-    UNIQUE(schedule_date, coach_name)
-);
-hourly_demand_snapshots
-More granular than the existing demand_snapshots (which is 1 row per agent per day). This records once per hour.
-
-
-CREATE TABLE hourly_demand_snapshots (
-    id              SERIAL PRIMARY KEY,
-    snapshot_date   DATE NOT NULL,
-    snapshot_hour   SMALLINT NOT NULL,     -- 0–23
-    agent_id        INTEGER REFERENCES agents(id),
-    package_name    VARCHAR(100),          -- NULL = all packages for agent
-    pending_count   INTEGER NOT NULL DEFAULT 0,
-    incoming_count  INTEGER NOT NULL DEFAULT 0,  -- chats that arrived this hour
-    handled_count   INTEGER NOT NULL DEFAULT 0,  -- chats replied this hour
-    breach_count    INTEGER NOT NULL DEFAULT 0,
-    agent_active    BOOLEAN DEFAULT TRUE,
-    UNIQUE(snapshot_date, snapshot_hour, agent_id, package_name)
-);
-
-CREATE INDEX idx_hourly_snap_date ON hourly_demand_snapshots(snapshot_date, snapshot_hour);
-agent_capacity_config
-Configurable per-package capacity weights (replaces the single avg_minutes_per_chat setting).
-
-
-CREATE TABLE agent_capacity_config (
-    id                    SERIAL PRIMARY KEY,
-    package_name          VARCHAR(100) NOT NULL UNIQUE,
-    complexity_weight     NUMERIC(4,2) NOT NULL DEFAULT 1.0,
-    -- multiplier on base handling time: 1.5 = 50% harder than baseline
-    avg_handling_minutes  NUMERIC(6,2) NOT NULL DEFAULT 10.0,
-    max_concurrent_chats  SMALLINT DEFAULT 3,
-    -- Max chats agent should handle in parallel for this package
-    sla_priority          SMALLINT NOT NULL DEFAULT 3,
-    -- 1=highest (Fit Solo Pro), 4=lowest (Fit Express)
-    is_scheduled_workload BOOLEAN DEFAULT FALSE,
-    -- TRUE = Fit Express, handled as batch, not live queue
-    updated_at            TIMESTAMP DEFAULT NOW()
-);
-
--- Seed data
-INSERT INTO agent_capacity_config
-    (package_name, complexity_weight, avg_handling_minutes, max_concurrent_chats, sla_priority, is_scheduled_workload)
-VALUES
-    ('Fit Solo Pro', 1.5, 12.0, 2, 1, FALSE),
-    ('Fit Fam Pro',  1.5, 12.0, 2, 2, FALSE),
-    ('Fit Solo',     1.0, 10.0, 3, 3, FALSE),
-    ('Fit Duo',      1.0, 10.0, 3, 3, FALSE),
-    ('Fit Fam',      1.1, 11.0, 3, 3, FALSE),
-    ('Fit Express',  0.4,  5.0, 5, 4, TRUE);
-forecast_models
-Stores precomputed forecast parameters updated nightly.
-
-
-CREATE TABLE forecast_models (
-    id                  SERIAL PRIMARY KEY,
-    package_name        VARCHAR(100) NOT NULL,
-    weekday             SMALLINT NOT NULL,           -- 0=Sun .. 6=Sat
-    model_type          VARCHAR(20) DEFAULT 'ema',   -- 'ema', 'seasonal'
-    alpha               NUMERIC(4,3) DEFAULT 0.3,    -- EMA smoothing factor
-    forecast_demand     NUMERIC(8,2),                -- expected daily demand
-    seasonality_index   NUMERIC(6,3) DEFAULT 1.0,    -- relative to weekly avg
-    std_deviation       NUMERIC(8,2),                -- demand variability
-    agents_required     NUMERIC(6,2),
-    confidence_low      NUMERIC(8,2),
-    confidence_high     NUMERIC(8,2),
-    last_computed_at    TIMESTAMP DEFAULT NOW(),
-    UNIQUE(package_name, weekday)
-);
-2.2 Schema Migrations for Existing Tables
-Add to agents
-
-ALTER TABLE agents ADD COLUMN IF NOT EXISTS package_specialty VARCHAR(100);
--- Primary package this agent handles (for assignment recommendations)
-
-ALTER TABLE agents ADD COLUMN IF NOT EXISTS max_concurrent_chats SMALLINT DEFAULT 3;
--- Override global capacity config at agent level
-
-ALTER TABLE agents ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMP;
--- For detecting truly inactive agents (status stale > N minutes)
-Add to sessions
-
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS package_name VARCHAR(100);
--- Backfilled from Supabase room data, enables per-package session metrics
-
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS first_response_seconds INTEGER;
--- Time from session start to first agent message (key SLA metric)
-Add to demand_snapshots
-
-ALTER TABLE demand_snapshots ADD COLUMN IF NOT EXISTS package_breakdown JSONB DEFAULT '{}';
--- { "Fit Solo Pro": 3, "Fit Solo": 12, ... } per agent at snapshot time
-PART 3: CALCULATIONS & FORMULAS
-3.1 Redesigned Utilization Model
-The current formula is:
-
-
-workload_ratio = (pending / hours_remaining) / (60 / avg_minutes_per_chat)
-This is inflated because it ignores package complexity, concurrency, and actual handling capacity.
-
-New formula:
-
-
-// Step 1: Weighted pending load
-function weightedPendingLoad(pendingByPackage, capacityConfig) {
-    return Object.entries(pendingByPackage).reduce((total, [pkg, count]) => {
-        const cfg = capacityConfig[pkg];
-        if (cfg.is_scheduled_workload) return total; // Fit Express excluded from live load
-        return total + (count * cfg.complexity_weight);
-    }, 0);
-}
-
-// Step 2: Agent throughput capacity (chats/hour at sustainable pace)
-function agentThroughputCapacity(agent, capacityConfig) {
-    // Weighted avg handling time across agent's package mix
-    const weightedAvgHandling = computeWeightedAvgHandling(agent, capacityConfig);
-    // Base: how many chats per hour the agent can handle sustainably
-    const concurrencyFactor = agent.max_concurrent_chats; // e.g., 3
-    return (60 / weightedAvgHandling) * concurrencyFactor;
-    // Example: 60/10 * 3 = 18 chats/hour max
-}
-
-// Step 3: Required throughput to clear queue before shift end
-function requiredThroughput(weightedLoad, hoursRemaining) {
-    if (hoursRemaining <= 0) return Infinity;
-    return weightedLoad / hoursRemaining;
-}
-
-// Step 4: Utilization score (0–100+)
-function utilizationScore(required, capacity) {
-    return (required / capacity) * 100;
-}
-
-// Thresholds
-const UTILIZATION_THRESHOLDS = {
-    HEALTHY:       { max: 70,  label: 'Healthy',       color: '#22c55e' },
-    BUSY:          { max: 85,  label: 'Busy',           color: '#f59e0b' },
-    OVERLOAD:      { max: 100, label: 'Overload',       color: '#ef4444' },
-    UNSUSTAINABLE: { max: Infinity, label: 'Critical',  color: '#991b1b' },
+```js
+const PACKAGES = {
+  'Fit Solo Pro': {
+    sla_hours: 1,
+    working_days: [0,1,2,3,4,5],   // Sun–Fri
+    window_start: 12,               // 12:00
+    window_end: 21,                 // 21:00
+    tier: 'PRO',
+    complexity_weight: 2.5,
+  },
+  'Fit Fam Pro': {
+    sla_hours: 1,
+    working_days: [0,1,2,3,4,5],
+    window_start: 12,
+    window_end: 21,
+    tier: 'PRO',
+    complexity_weight: 2.5,
+  },
+  'Fit Solo': {
+    sla_hours: 24,
+    working_days: [0,1,2,3,4],     // Sun–Thu
+    window_start: 11,
+    window_end: 18,
+    tier: 'STANDARD',
+    complexity_weight: 1.5,
+  },
+  'Fit Duo': {
+    sla_hours: 24,
+    working_days: [0,1,2,3,4],
+    window_start: 11,
+    window_end: 18,
+    tier: 'STANDARD',
+    complexity_weight: 1.5,
+  },
+  'Fit Fam': {
+    sla_hours: 24,
+    working_days: [0,1,2,3,4],
+    window_start: 11,
+    window_end: 18,
+    tier: 'STANDARD',
+    complexity_weight: 1.5,
+  },
+  'Fit Express': {
+    sla_hours: null,                // weekly scheduled reply
+    working_days: [0,1,2,3,4],
+    window_start: 11,
+    window_end: 18,
+    tier: 'EXPRESS',
+    complexity_weight: 0.8,
+  },
 };
-Burnout Risk Score (agent-level):
+```
 
+### 2.2 SLA Engine — Working-Hours-Only Clock
 
-function burnoutRiskScore(agent, sessionData, shiftData) {
-    const factors = {
-        utilizationScore:   clamp(utilizationScore / 100, 0, 1.5),  // weight: 0.40
-        continuousHours:    clamp(shiftData.activeHours / 8, 0, 2),  // weight: 0.25
-        messagesPerHour:    clamp(sessionData.msgPerHour / 30, 0, 2),// weight: 0.20
-        breakFrequency:     clamp(1 - (breakCount / expectedBreaks), 0, 1), // weight: 0.15
-    };
-    return (
-        factors.utilizationScore   * 0.40 +
-        factors.continuousHours    * 0.25 +
-        factors.messagesPerHour    * 0.20 +
-        factors.breakFrequency     * 0.15
-    ) * 100;
-    // 0–100: <40 safe, 40–70 elevated, >70 high risk
-}
-3.2 SLA Risk Score (per package)
+SLA breach calculations MUST account for working hours only, not wall-clock time.
 
-function computeSlaRiskScore({
-    currentSlaRate,          // % achieved so far today
-    projectedSlaEod,         // projected by end of shift
-    queueDepth,              // pending chats right now
-    incomingRate,            // chats arriving per hour (last 2h avg)
-    handlingRate,            // chats resolved per hour (last 2h avg)
-    oldestPendingMinutes,    // age of oldest unanswered chat
-    slaWindowMinutes,        // package max SLA (e.g. 60 for Pro, 1440 for Solo)
-}) {
-    // Component 1: Queue depth pressure (0–1)
-    const queueCapacityRatio = incomingRate / Math.max(handlingRate, 1);
-    const queuePressure = clamp(queueCapacityRatio - 0.5, 0, 1);
+**Algorithm: `computeSlaDeadline(received_at, package)`**
 
-    // Component 2: SLA erosion (0–1)
-    const targetSla = 95; // target SLA %
-    const slaGap = clamp((targetSla - projectedSlaEod) / targetSla, 0, 1);
+```
+1. Start from received_at
+2. If outside working window → advance to next window open
+3. Consume SLA hours only while inside working window
+4. Return deadline timestamp
+```
 
-    // Component 3: Near-breach urgency (0–1)
-    const breachUrgency = clamp(oldestPendingMinutes / slaWindowMinutes, 0, 1.5);
+**Algorithm: `computeTimeToBreachMinutes(deadline, now)`**
 
-    // Weighted composite
-    const rawScore = (
-        queuePressure  * 0.35 +
-        slaGap         * 0.40 +
-        breachUrgency  * 0.25
-    ) * 100;
+```
+1. If now > deadline → already breached (negative value)
+2. Remaining = deadline - now (working minutes only)
+3. Return remaining_minutes
+```
 
-    const riskScore = clamp(rawScore, 0, 100);
+### 2.3 Shift Detection Engine
 
-    const riskLevel =
-        riskScore >= 75 ? 'critical' :
-        riskScore >= 50 ? 'high'     :
-        riskScore >= 25 ? 'medium'   : 'low';
+**Problem:** "Agents on shift = 0" while overloaded agents show data. Root cause is static schedule lookup failing to match current time to active shift windows.
 
-    return { riskScore, riskLevel };
-}
-3.3 Queue Growth Rate
+**Correct Logic:**
 
-function queueGrowthRate(snapshots, windowMinutes = 15) {
-    // snapshots: [{captured_at, pending_count}, ...] sorted newest-first
-    const cutoff = Date.now() - windowMinutes * 60 * 1000;
-    const recent   = snapshots.filter(s => s.captured_at >= cutoff);
-    const baseline = snapshots.find(s => s.captured_at < cutoff);
+```js
+function isAgentOnShift(agent, now) {
+  const dayOfWeek = now.getDay();       // 0=Sun, 6=Sat
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const timeDecimal = hour + minute / 60;
 
-    if (!baseline || recent.length === 0) return 0;
+  const todayShift = agent.shifts.find(s =>
+    s.day_of_week === dayOfWeek &&
+    s.start_hour <= timeDecimal &&
+    s.end_hour > timeDecimal
+  );
 
-    const latest = recent[0];
-    const delta  = latest.pending_count - baseline.pending_count;
-    const elapsedHours = (latest.captured_at - baseline.captured_at) / 3_600_000;
-    return delta / elapsedHours; // chats added per hour; negative = shrinking
-}
-3.4 Projected Queue at T+N
-
-function projectQueueAtTime(currentQueue, incomingRate, handlingRate, hoursAhead) {
-    // Linear projection (suitable for 1–4h lookahead)
-    const netRate = incomingRate - handlingRate; // chats/hour
-    return Math.max(0, currentQueue + netRate * hoursAhead);
+  return !!todayShift;
 }
 
-// Extended version: projected SLA breaches
-function projectedBreaches(queueByAge, handlingRate, slaWindowMinutes, hoursAhead) {
-    let breaches = 0;
-    for (const chat of queueByAge) {
-        const projectedAgeMinutes = chat.currentAgeMinutes + (hoursAhead * 60);
-        const projectedPosition   = chat.queuePosition / Math.max(handlingRate, 1);
-        const totalWaitMinutes    = projectedAgeMinutes + projectedPosition * 60;
-        if (totalWaitMinutes > slaWindowMinutes) breaches++;
+function getAgentShiftStatus(agent, now) {
+  if (!isAgentOnShift(agent, now)) return 'OFF_SHIFT';
+  if (agent.last_seen < now - ONLINE_THRESHOLD_MS) return 'ON_SHIFT_OFFLINE';
+  return 'ON_SHIFT_ONLINE';
+}
+```
+
+**Agent Status Taxonomy:**
+
+| Status | Definition |
+|---|---|
+| `ON_SHIFT_ONLINE` | Shift is active AND agent activity seen within threshold |
+| `ON_SHIFT_OFFLINE` | Shift is active BUT no recent activity (possible absence) |
+| `OFF_SHIFT` | Shift window not active for this agent right now |
+| `ON_BREAK` | Agent manually marked on break |
+
+### 2.4 Prioritization System
+
+Every pending conversation is scored and sorted by a **Priority Score**:
+
+```
+Priority Score = (SLA Urgency Weight × 40)
+              + (Package Tier Weight × 30)
+              + (Queue Age Weight × 20)
+              + (Client VIP Flag × 10)
+```
+
+| Component | Formula |
+|---|---|
+| SLA Urgency | `1 - (minutes_remaining / sla_window_minutes)` → 0.0–1.0 |
+| Package Tier | PRO=1.0, STANDARD=0.5, EXPRESS=0.2 |
+| Queue Age | `min(queue_age_minutes / 120, 1.0)` → capped at 1.0 |
+| VIP Flag | 1 if client flagged VIP, else 0 |
+
+---
+
+## 3. Utilization Model
+
+### 3.1 The Problem with Chat Count
+
+Using raw chat count as utilization ignores:
+- A Pro chat requires ~2.5× more cognitive effort than Express
+- An SLA-critical chat demands immediate attention (urgency multiplier)
+- Active (typing) conversations require more attention than waiting ones
+- Concurrency — handling 3 simultaneous chats is non-linear effort
+
+### 3.2 Weighted Workload Score (WWS)
+
+For each agent:
+
+```
+WWS = Σ (chat_i.base_weight × chat_i.urgency_multiplier × chat_i.activity_multiplier)
+```
+
+**Base Weight by Package:**
+
+| Package | Base Weight |
+|---|---|
+| Fit Solo Pro | 2.5 |
+| Fit Fam Pro | 2.5 |
+| Fit Solo | 1.5 |
+| Fit Duo | 1.5 |
+| Fit Fam | 1.5 |
+| Fit Express | 0.8 |
+
+**Urgency Multiplier:**
+
+```
+urgency_pct = 1 - (minutes_to_breach / sla_window_minutes)
+
+if urgency_pct >= 0.90 → multiplier = 3.0   (breach imminent)
+if urgency_pct >= 0.75 → multiplier = 2.0   (critical)
+if urgency_pct >= 0.50 → multiplier = 1.5   (elevated)
+else                   → multiplier = 1.0   (normal)
+```
+
+**Activity Multiplier:**
+
+```
+if chat.state = 'ACTIVE'   → 1.3  (agent actively typing/reading)
+if chat.state = 'WAITING'  → 1.0  (awaiting client reply)
+if chat.state = 'RESOLVED' → 0.0  (excluded)
+```
+
+### 3.3 Utilization Percentage
+
+```
+Utilization% = (Agent_WWS / Agent_Max_WWS) × 100
+```
+
+**Agent_Max_WWS** is the sustainable capacity ceiling. Default model:
+
+```
+Agent_Max_WWS = concurrent_capacity × avg_chat_weight × comfort_factor
+
+Where:
+  concurrent_capacity = 6 chats (configurable per agent)
+  avg_chat_weight     = 1.5 (weighted average of STANDARD package)
+  comfort_factor      = 0.85 (15% headroom for quality)
+
+Default Max_WWS = 6 × 1.5 × 0.85 = 7.65
+```
+
+**Utilization thresholds:**
+
+| Range | Status |
+|---|---|
+| 0–60% | Underutilized |
+| 60–80% | Optimal |
+| 80–95% | Elevated |
+| 95–110% | Overloaded |
+| >110% | Critical Overload |
+
+### 3.4 Team Utilization
+
+```
+Team_Utilization% = (Σ Agent_WWS) / (Σ Agent_Max_WWS) × 100
+```
+
+Only agents with status `ON_SHIFT_ONLINE` or `ON_SHIFT_OFFLINE` are included in the denominator.
+
+### 3.5 Effective Capacity
+
+```
+Effective_Capacity = Σ (Agent_Max_WWS) for ON_SHIFT_ONLINE agents only
+
+Capacity_Gap = Team_Demand_WWS - Effective_Capacity
+```
+
+A positive `Capacity_Gap` means the team is structurally overloaded — not just one agent.
+
+### 3.6 Occupancy Rate
+
+```
+Occupancy% = (Time_Handling_Chats) / (Total_Shift_Time) × 100
+```
+
+Target occupancy for sustainable operations: **70–80%**. Above 85% leads to quality degradation and burnout.
+
+---
+
+## 4. Queue Engine Design
+
+### 4.1 Queue State Model
+
+Each conversation in the queue carries this state:
+
+```ts
+interface QueueEntry {
+  conversation_id:     string;
+  client_name:         string;
+  package:             PackageKey;
+  tier:                'PRO' | 'STANDARD' | 'EXPRESS';
+  assigned_agent_id:   string | null;
+  received_at:         Date;
+  last_interaction_at: Date;
+  last_message_side:   'client' | 'staff';
+  sla_deadline:        Date;
+  minutes_to_breach:   number;        // recalculated on each tick
+  queue_age_minutes:   number;
+  base_weight:         number;
+  urgency_multiplier:  number;
+  priority_score:      number;        // composite (see §2.4)
+  urgency_level:       'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  breach_predicted_at: Date | null;   // forecasted breach time
+}
+```
+
+### 4.2 Urgency Level Assignment
+
+```
+if minutes_to_breach <= 0            → BREACHED (outside queue, tracked separately)
+if minutes_to_breach <= 15           → CRITICAL
+if minutes_to_breach <= 60           → HIGH
+if minutes_to_breach <= sla_30pct   → MEDIUM
+else                                 → LOW
+```
+
+Where `sla_30pct = sla_window_minutes × 0.30`.
+
+### 4.3 Queue Sorting Algorithm
+
+Default sort order (multi-key, descending priority):
+
+```
+1. urgency_level (CRITICAL > HIGH > MEDIUM > LOW)
+2. tier (PRO > STANDARD > EXPRESS)
+3. priority_score (descending)
+4. minutes_to_breach (ascending — soonest breach first)
+5. queue_age_minutes (descending — oldest first as tiebreaker)
+```
+
+### 4.4 Time-to-Breach Engine
+
+Working-hours-aware countdown:
+
+```js
+function getWorkingMinutesRemaining(now, deadline, packageKey) {
+  const pkg = PACKAGES[packageKey];
+  let remaining = 0;
+  let cursor = new Date(now);
+
+  while (cursor < deadline) {
+    if (isWorkingTime(cursor, pkg)) {
+      remaining++;
     }
-    return breaches;
+    cursor.setMinutes(cursor.getMinutes() + 1);
+  }
+  return remaining;
 }
-3.5 Workload Fairness (Gini Coefficient)
+```
 
-function workloadFairness(agentLoads) {
-    // Returns 0 (perfect equality) to 1 (maximum inequality)
-    const sorted = [...agentLoads].sort((a, b) => a - b);
-    const n = sorted.length;
-    if (n === 0) return 0;
-    const sumDiffs = sorted.reduce((acc, xi, i) =>
-        acc + sorted.reduce((acc2, xj) => acc2 + Math.abs(xi - xj), 0), 0);
-    const mean = sorted.reduce((a, b) => a + b, 0) / n;
-    return sumDiffs / (2 * n * n * mean);
+For performance, pre-compute deadlines and cache them. Recalculate only when `now` crosses a working window boundary.
+
+### 4.5 Breach Wave Forecasting
+
+Every 60 seconds, compute:
+
+```
+breach_waves = {
+  next_15_min: queue.filter(c => c.minutes_to_breach <= 15).length,
+  next_30_min: queue.filter(c => c.minutes_to_breach <= 30).length,
+  next_60_min: queue.filter(c => c.minutes_to_breach <= 60).length,
+  by_tier: {
+    PRO: queue.filter(c => c.tier === 'PRO' && c.minutes_to_breach <= 60),
+    ...
+  }
 }
+```
 
-// Score: <0.15 balanced, 0.15–0.35 uneven, >0.35 critical imbalance
-3.6 Staffing Requirements Formula
+### 4.6 Queue Flow Metrics
 
-function staffingRequired(forecastedDemand, shiftHours, capacityConfig, packageMix) {
-    // forecastedDemand: total chats expected for this period
-    // packageMix: { 'Fit Solo Pro': 0.2, 'Fit Solo': 0.6, ... } (proportion)
-    
-    // Weighted chats per agent per shift
-    const weightedHandlingTime = Object.entries(packageMix).reduce((sum, [pkg, pct]) => {
-        const cfg = capacityConfig[pkg];
-        if (cfg.is_scheduled_workload) return sum;
-        return sum + cfg.avg_handling_minutes * cfg.complexity_weight * pct;
-    }, 0);
-    
-    const chatsPerAgentPerShift = (shiftHours * 60) / weightedHandlingTime;
-    const rawRequired = forecastedDemand / chatsPerAgentPerShift;
-    
-    // Add 15% buffer for SLA safety
-    return Math.ceil(rawRequired * 1.15);
+Track these every tick:
+
+| Metric | Formula |
+|---|---|
+| Incoming Rate | new conversations per 15-min window |
+| Processed Rate | replied conversations per 15-min window |
+| Net Queue Growth | Incoming Rate − Processed Rate |
+| Drain Time | current_queue_size / processed_rate_per_hour |
+| Queue Velocity | signed rate of change (negative = draining) |
+
+If `Net Queue Growth > 0` consistently for 3 windows → trigger staffing alert.
+
+---
+
+## 5. Alert Engine Design
+
+### 5.1 The Deduplication Problem
+
+Current engine fires one alert per polling cycle. An overloaded agent alert fires every 30 seconds — creating noise that masks real escalations.
+
+**Solution: Stateful Alert Registry**
+
+```ts
+interface AlertRecord {
+  alert_id:     string;               // stable hash of (type + subject_id)
+  type:         AlertType;
+  subject_id:   string;               // agent_id, queue segment, etc.
+  state:        'FIRING' | 'WORSENING' | 'STABLE' | 'RESOLVED';
+  severity:     'INFO' | 'WARNING' | 'CRITICAL' | 'EMERGENCY';
+  first_fired:  Date;
+  last_updated: Date;
+  resolved_at:  Date | null;
+  fire_count:   number;
+  metadata:     Record<string, any>;
 }
-3.7 Forecasting: EMA with Day-of-Week Seasonality
+```
 
-function updateEmaForecast(historicalDemand, alpha = 0.3) {
-    // historicalDemand: array of {date, weekday, demand} sorted oldest-first
-    
-    // Group by weekday
-    const byWeekday = Array.from({length: 7}, () => []);
-    historicalDemand.forEach(d => byWeekday[d.weekday].push(d.demand));
-    
-    // Compute EMA per weekday
-    const forecasts = {};
-    for (let wd = 0; wd <= 6; wd++) {
-        const series = byWeekday[wd];
-        if (series.length === 0) continue;
-        
-        let ema = series[0];
-        for (let i = 1; i < series.length; i++) {
-            ema = alpha * series[i] + (1 - alpha) * ema;
-        }
-        
-        const stdDev = computeStdDev(series);
-        forecasts[wd] = {
-            forecast: Math.round(ema),
-            confidenceLow:  Math.round(ema - 1.96 * stdDev),
-            confidenceHigh: Math.round(ema + 1.96 * stdDev),
-            stdDev: Math.round(stdDev),
-        };
-    }
-    return forecasts;
+### 5.2 Alert Lifecycle
+
+```
+NEW CONDITION DETECTED
+        │
+        ▼
+Alert exists in registry?
+   NO  ─────► CREATE alert (state=FIRING, severity=initial)
+        │
+       YES
+        ▼
+Condition worsened?
+   YES ─────► UPDATE state=WORSENING, escalate severity
+        │      reset cooldown timer
+        ▼
+Condition improved?
+   NO  ─────► state=STABLE (no new notification)
+        │
+       YES
+        ▼
+Condition resolved?
+   YES ─────► state=RESOLVED, log to alert_history
+```
+
+### 5.3 Cooldown Logic
+
+```
+On FIRING:    notify immediately
+On WORSENING: notify immediately (overrides cooldown)
+On STABLE:    suppress for cooldown_minutes (default: 15 min)
+On RESOLVED:  notify once (resolution notification)
+```
+
+Cooldown is **per alert_id**, not global.
+
+### 5.4 Severity Escalation Matrix
+
+| Alert Type | INFO | WARNING | CRITICAL | EMERGENCY |
+|---|---|---|---|---|
+| Agent Overload | WWS 80–95% | WWS 95–110% | WWS >110% | WWS >130% |
+| SLA Breach Risk | 60 min to breach | 30 min to breach | 15 min to breach | Breach active |
+| Queue Velocity | net +2/hr | net +5/hr | net +10/hr | net +20/hr |
+| Staffing Coverage | 1 below min | at min | 2 below min | 0 agents on shift |
+| PRO Tier At Risk | 1 PRO near breach | 2 PRO near breach | PRO breached | Multiple PRO breached |
+
+### 5.5 Alert Types Registry
+
+```
+AGENT_OVERLOAD          — per agent
+AGENT_OFFLINE_ON_SHIFT  — per agent
+SLA_BREACH_IMMINENT     — per conversation
+SLA_BREACH_ACTIVE       — per conversation
+QUEUE_GROWING           — team level
+QUEUE_CRITICAL          — team level
+STAFFING_SHORTAGE       — shift level
+CAPACITY_GAP            — team level
+PRO_TIER_AT_RISK        — package level
+FORECAST_FAILURE        — predictive
+```
+
+---
+
+## 6. Ops Score Engine
+
+### 6.1 Scoring Philosophy
+
+The Ops Score is a **weighted composite** of 6 operational health dimensions. Each dimension produces a score from 0–100. A transparent formula ensures managers can explain why the score changed.
+
+### 6.2 Dimension Formulas
+
+**Dimension 1: SLA Health (weight: 25%)**
+```
+SLA_Health = 100 × (1 - (breached_count / max(pending_count, 1)))
+           - (near_breach_count × 5)   // penalty per near-breach
+Clamped to [0, 100]
+```
+
+**Dimension 2: Queue Health (weight: 20%)**
+```
+Queue_Health = 100 - clamp(queue_velocity × 10, 0, 100)
+             - clamp((queue_size / ideal_queue_size - 1) × 50, 0, 50)
+```
+
+**Dimension 3: Staffing Health (weight: 20%)**
+```
+Staffing_Health = clamp((online_agents / required_agents) × 100, 0, 100)
+```
+
+**Dimension 4: PRO Tier Risk (weight: 20%)**
+```
+PRO_Risk = 100 - (pro_breached × 30) - (pro_near_breach × 15)
+Clamped to [0, 100]
+```
+
+**Dimension 5: Capacity Balance (weight: 10%)**
+```
+Capacity_Balance = 100 - clamp(max_agent_utilization - 80, 0, 20) × 5
+                 - clamp(overloaded_agent_count × 10, 0, 40)
+```
+
+**Dimension 6: Backlog Risk (weight: 5%)**
+```
+Backlog_Risk = 100 - clamp((drain_time_hours - 1) × 20, 0, 100)
+```
+
+### 6.3 Composite Ops Score
+
+```
+Ops_Score = (SLA_Health × 0.25)
+          + (Queue_Health × 0.20)
+          + (Staffing_Health × 0.20)
+          + (PRO_Tier_Risk × 0.20)
+          + (Capacity_Balance × 0.10)
+          + (Backlog_Risk × 0.05)
+```
+
+### 6.4 Score Bands
+
+| Score | Label | Color |
+|---|---|---|
+| 90–100 | Excellent | Green |
+| 75–89 | Good | Blue |
+| 60–74 | Fair | Yellow |
+| 40–59 | At Risk | Orange |
+| 0–39 | Critical | Red |
+
+### 6.5 Explainability Output
+
+Every score emission includes a breakdown:
+
+```json
+{
+  "ops_score": 71,
+  "band": "Fair",
+  "dimensions": {
+    "sla_health":        { "score": 85, "weight": 0.25, "contribution": 21.25, "note": "2 near-breach chats" },
+    "queue_health":      { "score": 60, "weight": 0.20, "contribution": 12.00, "note": "queue growing +4/hr" },
+    "staffing_health":   { "score": 80, "weight": 0.20, "contribution": 16.00, "note": "4/5 required agents online" },
+    "pro_tier_risk":     { "score": 70, "weight": 0.20, "contribution": 14.00, "note": "1 PRO near breach" },
+    "capacity_balance":  { "score": 75, "weight": 0.10, "contribution":  7.50, "note": "Manar at 98% utilization" },
+    "backlog_risk":      { "score": 100, "weight": 0.05, "contribution":  5.00, "note": "queue draining normally" }
+  },
+  "top_risk": "queue_health",
+  "confidence": "HIGH"
 }
-PART 4: QUEUE MANAGEMENT LOGIC
-4.1 Queue Polling Engine
-The Supabase RPC get_chat_rooms_paginated is the source of truth for queue state. Build a dedicated queue polling service in the backend.
+```
 
+**Confidence Level:**
+- `HIGH`: all required data freshness < 2 minutes
+- `MEDIUM`: some data 2–5 minutes stale
+- `LOW`: data older than 5 minutes or missing components
 
-// server/services/queue-engine.js
+---
 
-const POLL_INTERVAL_MS    = 60 * 1000;  // Poll Supabase every 60 seconds
-const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000; // Write snapshot every 5 minutes
+## 7. Real-Time System Design
 
-class QueueEngine {
-    constructor(supabase, db, capacityConfig) {
-        this.supabase = supabase;
-        this.db = db;
-        this.capacityConfig = capacityConfig;
-        this.state = {};  // In-memory: { packageName: QueueState }
-        this.subscribers = new Set(); // SSE subscribers
-    }
+### 7.1 Refresh Strategy
 
-    async poll() {
-        const packages = Object.keys(SLA_RULES); // ['Fit Solo Pro', ...]
-        const results  = await Promise.all(packages.map(p => this.fetchQueueForPackage(p)));
-        const now      = new Date();
-        
-        const newState = {};
-        for (const result of results) {
-            newState[result.package] = {
-                ...result,
-                capturedAt: now,
-                growthRate: this.computeGrowthRate(result.package, result.pendingCount),
-                severity:   this.classifySeverity(result),
-            };
-        }
-        
-        this.state = newState;
-        this.notifySubscribers({ type: 'queue_update', data: newState, ts: now });
-        
-        // Persist to queue_state table every N polls
-        await this.persistQueueState(newState);
-    }
+**Problem:** Pure polling means stale data between cycles and redundant computation.
 
-    async fetchQueueForPackage(packageName) {
-        // Query Supabase: all rooms waiting for staff reply, for this package
-        const { data, error } = await this.supabase.rpc('get_chat_rooms_paginated', {
-            p_package_name:      packageName,
-            p_last_message_from: 'client',
-            p_limit:             500,
-            p_offset:            0,
-        });
-        if (error) throw error;
+**Solution: Hybrid Push + Pull**
 
-        const slaRule = SLA_RULES[packageName];
-        const now     = Date.now();
-        
-        let oldestAt = null;
-        let nearBreachCount = 0;
-        const waitTimes = [];
-        
-        for (const room of data.rooms) {
-            const lastClientMsgAt = new Date(room.last_message_at).getTime();
-            const waitMinutes     = (now - lastClientMsgAt) / 60_000;
-            waitTimes.push(waitMinutes);
-            
-            if (!oldestAt || lastClientMsgAt < new Date(oldestAt).getTime()) {
-                oldestAt = room.last_message_at;
-            }
-            
-            const breachPct = waitMinutes / slaRule.maxMinutes;
-            if (breachPct >= 0.75) nearBreachCount++;  // 75% of SLA window elapsed
-        }
-        
-        const avgWait = waitTimes.length > 0
-            ? waitTimes.reduce((a, b) => a + b, 0) / waitTimes.length
-            : 0;
-        
-        return {
-            package:          packageName,
-            pendingCount:     data.total_count ?? data.rooms.length,
-            oldestPendingAt:  oldestAt,
-            avgWaitMinutes:   avgWait,
-            nearBreachCount:  nearBreachCount,
-            maxWaitMinutes:   waitTimes.length > 0 ? Math.max(...waitTimes) : 0,
-        };
-    }
+```
+WebSocket (push):
+  - Alert state changes     → immediate push on event
+  - SLA breach imminent     → push when TTB crosses threshold
+  - Agent status changes    → push on state transition
+  - Ops score updates       → push every 60 seconds or on trigger
 
-    classifySeverity(queueState) {
-        const { nearBreachCount, pendingCount, avgWaitMinutes } = queueState;
-        const slaRule = SLA_RULES[queueState.package];
-        
-        if (nearBreachCount >= 3 || avgWaitMinutes > slaRule.maxMinutes * 0.85) return 'red';
-        if (nearBreachCount >= 1 || avgWaitMinutes > slaRule.maxMinutes * 0.60) return 'yellow';
-        return 'green';
-    }
+REST polling (pull):
+  - Queue table data        → every 30 seconds (operator-tunable)
+  - Workload snapshot       → every 60 seconds
+  - Forecast data           → every 5 minutes
+  - Historical analytics    → on demand
+```
 
-    computeGrowthRate(packageName, currentCount) {
-        const recent = this.history?.[packageName];
-        if (!recent || recent.length < 2) return 0;
-        const oldest  = recent[0];
-        const delta   = currentCount - oldest.pendingCount;
-        const elapsed = (Date.now() - oldest.capturedAt) / 3_600_000;
-        return delta / elapsed;  // chats/hour
-    }
+### 7.2 Server-Side Event Loop Architecture
+
+```js
+class OpsEngineLoop {
+  async tick() {
+    const now = new Date();
+
+    const [conversations, agents, shifts] = await Promise.all([
+      this.fetchPendingConversations(),
+      this.fetchAgentStatuses(),
+      this.fetchActiveShifts(now),
+    ]);
+
+    const shiftState    = this.shiftEngine.evaluate(agents, shifts, now);
+    const queueState    = this.queueEngine.evaluate(conversations, now);
+    const workloadState = this.workloadEngine.evaluate(agents, conversations, now);
+    const alertDelta    = this.alertEngine.evaluate(shiftState, queueState, workloadState);
+    const opsScore      = this.scoreEngine.compute(shiftState, queueState, workloadState);
+
+    await this.persistSnapshot({ shiftState, queueState, workloadState, opsScore, now });
+
+    this.pushDeltas({ alertDelta, opsScore, queueState });
+  }
 }
-4.2 Priority Queue Sorting
-When presenting the queue to managers for action, chats are sorted by priority score:
+```
 
+### 7.3 WebSocket Architecture
 
-function priorityScore(chat, packageConfig, slaRule) {
-    const waitMinutes    = (Date.now() - new Date(chat.last_message_at)) / 60_000;
-    const urgencyRatio   = waitMinutes / slaRule.maxMinutes;    // 0–1+
-    const priorityTier   = (5 - packageConfig.sla_priority);    // 4 for Pro, 1 for Express
-    
-    // Express is scheduled, not live queue → override to 0 urgency
-    if (packageConfig.is_scheduled_workload) return 0;
-    
-    return (urgencyRatio * 60) + (priorityTier * 15);
-    // Higher = must be handled first
-}
+```
+ws://server/ops-stream
 
-// Queue sorted by priorityScore DESC:
-// 1. Fit Solo Pro / Fit Fam Pro approaching breach
-// 2. Any package at or past SLA window
-// 3. Fit Solo / Duo / Fam by wait time
-// 4. Fit Express (scheduled batch, lowest)
-4.3 Fit Express Scheduled Workload
-Fit Express follows a weekly schedule, not a live queue. Build a separate scheduler:
+Client → Server:
+  { type: 'SUBSCRIBE', channels: ['alerts', 'queue', 'score'] }
+  { type: 'UNSUBSCRIBE', channels: ['queue'] }
 
+Server → Client:
+  { type: 'ALERT_DELTA',  payload: AlertRecord[] }
+  { type: 'SCORE_UPDATE', payload: OpsScoreResult }
+  { type: 'QUEUE_UPDATE', payload: QueueEntry[] }
+  { type: 'HEARTBEAT',    payload: { server_time, data_freshness } }
+```
 
-// server/services/express-scheduler.js
+### 7.4 Caching Strategy
 
-const WORKING_DAYS = [0, 1, 2, 3, 4]; // Sun–Thu
-const WINDOW_START = 11;               // 11:00 local
-const WINDOW_END   = 18;               // 18:00 local
+| Data Type | Cache TTL | Cache Layer |
+|---|---|---|
+| Agent shift schedule | 5 minutes | In-memory (server) |
+| Package definitions | Indefinite | Module-level constant |
+| Working hours calculations | 1 minute | In-memory per agent |
+| Historical queue snapshots | 1 hour | Redis / Supabase |
+| Demand forecast | 15 minutes | DB materialized view |
 
-async function scheduleFitExpressFollowUps(db, supabase, date) {
-    const weekday = new Date(date).getDay();
-    if (!WORKING_DAYS.includes(weekday)) return;
-    
-    // Fetch all Fit Express rooms whose scheduled reply day = today
-    // "Scheduled reply day" is determined by the room's subscription weekday
-    const rooms = await supabase.rpc('get_chat_rooms_paginated', {
-        p_package_name: 'Fit Express',
-        p_scheduled_weekday: weekday,
-        p_limit: 1000,
-        p_offset: 0,
-    });
-    
-    await db`
-        INSERT INTO fit_express_schedule
-            (schedule_date, weekday, total_rooms, pending_count, replied_count)
-        VALUES
-            (${date}, ${weekday}, ${rooms.total_count}, ${rooms.total_count}, 0)
-        ON CONFLICT (schedule_date, COALESCE(coach_name, ''))
-        DO UPDATE SET
-            total_rooms   = EXCLUDED.total_rooms,
-            pending_count = EXCLUDED.pending_count,
-            updated_at    = NOW()
-    `;
-}
-PART 5: SLA ENGINE LOGIC
-5.1 Engine Architecture
-The SLA engine runs as a background service, computing risk scores every 15 minutes and writing to sla_risk_scores.
+### 7.5 Polling Optimization
 
+- Deduplicate identical requests within a 500ms window (debounce)
+- Add `ETag`/`Last-Modified` headers to queue endpoints
+- Respond with `304 Not Modified` when queue state hash unchanged
+- Implement server-sent compression (gzip) for queue payloads > 1KB
 
-// server/services/sla-engine.js
+---
 
-const ENGINE_INTERVAL_MS = 15 * 60 * 1000; // Every 15 minutes
+## 8. Database Design
 
-class SlaEngine {
-    async run(db, queueEngine, agentService) {
-        const packages = Object.keys(SLA_RULES);
-        
-        for (const packageName of packages) {
-            const score = await this.computeRiskScore(
-                packageName, db, queueEngine, agentService
-            );
-            
-            await this.persistRiskScore(db, packageName, score);
-            
-            if (score.riskLevel !== 'low') {
-                await this.emitAlert(db, packageName, score);
-            }
-        }
-    }
+### 8.1 Core Tables
 
-    async computeRiskScore(packageName, db, queueEngine, agentService) {
-        const slaRule       = SLA_RULES[packageName];
-        const queueState    = queueEngine.state[packageName];
-        const activeAgents  = await agentService.getActiveAgentsForPackage(packageName);
-        
-        // --- Incoming rate: chats arriving per hour (last 3 hours from hourly_demand_snapshots)
-        const incomingRate = await this.computeIncomingRate(db, packageName, 3);
-        
-        // --- Handling rate: chats resolved per hour (last 3 hours from sessions)
-        const handlingRate = await this.computeHandlingRate(db, packageName, activeAgents, 3);
-        
-        // --- Current SLA rate (today so far, from SLA computation)
-        const currentSlaRate = await this.computeCurrentSlaRate(db, packageName);
-        
-        // --- Project queue in 1h
-        const projectedQueue1h = projectQueueAtTime(
-            queueState?.pendingCount ?? 0,
-            incomingRate,
-            handlingRate,
-            1
-        );
-        
-        // --- Simulate SLA at end of shift
-        const hoursLeftInShift = computeHoursLeftInShift(slaRule);
-        const projectedQueueEod = projectQueueAtTime(
-            queueState?.pendingCount ?? 0,
-            incomingRate,
-            handlingRate,
-            hoursLeftInShift
-        );
-        
-        // --- Projected SLA rates
-        // Total chats expected by EOD
-        const totalExpected = await this.getTotalExpectedToday(db, packageName, incomingRate, hoursLeftInShift);
-        const projectedBreachesByEod = Math.max(0, projectedQueueEod);
-        const projectedSlaEod = totalExpected > 0
-            ? ((totalExpected - projectedBreachesByEod) / totalExpected) * 100
-            : 100;
-        
-        // --- Risk score composite
-        const { riskScore, riskLevel } = computeSlaRiskScore({
-            currentSlaRate,
-            projectedSlaEod,
-            queueDepth:          queueState?.pendingCount ?? 0,
-            incomingRate,
-            handlingRate,
-            oldestPendingMinutes: queueState?.maxWaitMinutes ?? 0,
-            slaWindowMinutes:    slaRule.maxMinutes,
-        });
-        
-        // --- Agents needed to clear queue safely
-        const agentsNeeded = Math.ceil(incomingRate / this.targetHandlingRatePerAgent(packageName));
-        
-        return {
-            riskScore,
-            riskLevel,
-            currentSlaRate:   Math.round(currentSlaRate * 10) / 10,
-            projectedSlaEod:  Math.round(projectedSlaEod * 10) / 10,
-            projectedSla1h:   this.estimateProjectedSla1h(currentSlaRate, projectedSlaEod, hoursLeftInShift),
-            breachProbability: this.breachProbability(riskScore),
-            predictedBreaches: projectedBreachesByEod,
-            currentQueue:     queueState?.pendingCount ?? 0,
-            projectedQueue1h,
-            incomingRate:     Math.round(incomingRate * 10) / 10,
-            handlingRate:     Math.round(handlingRate * 10) / 10,
-            agentsNeeded,
-        };
-    }
+**`queue_state` — live queue snapshot**
+```sql
+CREATE TABLE queue_state (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id     TEXT NOT NULL UNIQUE,
+  client_name         TEXT,
+  package             TEXT NOT NULL,
+  tier                TEXT NOT NULL CHECK (tier IN ('PRO','STANDARD','EXPRESS')),
+  assigned_agent_id   UUID REFERENCES agents(id),
+  received_at         TIMESTAMPTZ NOT NULL,
+  last_interaction_at TIMESTAMPTZ,
+  last_message_side   TEXT CHECK (last_message_side IN ('client','staff')),
+  sla_deadline        TIMESTAMPTZ NOT NULL,
+  priority_score      NUMERIC(5,2),
+  urgency_level       TEXT,
+  queue_age_minutes   INTEGER,
+  wws_contribution    NUMERIC(5,2),
+  updated_at          TIMESTAMPTZ DEFAULT now()
+);
 
-    async computeIncomingRate(db, packageName, hours) {
-        // Use hourly_demand_snapshots: sum incoming_count over last N hours
-        const rows = await db`
-            SELECT SUM(incoming_count) AS total, COUNT(*) AS periods
-            FROM hourly_demand_snapshots
-            WHERE package_name = ${packageName}
-              AND snapshot_date = CURRENT_DATE
-              AND snapshot_hour >= EXTRACT(HOUR FROM NOW()) - ${hours}
-        `;
-        const { total, periods } = rows[0];
-        return periods > 0 ? (total / periods) : 0;  // avg chats/hour
-    }
-}
-5.2 SLA Risk Display Logic
+CREATE INDEX idx_queue_sla_deadline ON queue_state(sla_deadline);
+CREATE INDEX idx_queue_tier ON queue_state(tier);
+CREATE INDEX idx_queue_agent ON queue_state(assigned_agent_id);
+CREATE INDEX idx_queue_urgency ON queue_state(urgency_level, priority_score DESC);
+```
 
-// Translate risk score into human-readable warning
-function slaRiskMessage(packageName, score) {
-    if (score.riskLevel === 'critical') {
-        return `${packageName} SLA projected to fall to ${score.projectedSlaEod.toFixed(0)}% — immediate action required.`;
-    }
-    if (score.riskLevel === 'high') {
-        return `${packageName} SLA at risk (${score.projectedSlaEod.toFixed(0)}% projected). ${score.agentsNeeded} agents needed.`;
-    }
-    if (score.riskLevel === 'medium') {
-        return `${packageName} showing queue pressure. Monitor closely.`;
-    }
-    return null;
-}
-PART 6: FORECASTING LOGIC
-6.1 Nightly Model Recomputation
-Run once daily at midnight (use node-cron or setInterval with 24h drift guard):
+**`alert_registry` — stateful alert store**
+```sql
+CREATE TABLE alert_registry (
+  alert_id       TEXT PRIMARY KEY,
+  type           TEXT NOT NULL,
+  subject_id     TEXT NOT NULL,
+  state          TEXT NOT NULL,
+  severity       TEXT NOT NULL,
+  first_fired    TIMESTAMPTZ NOT NULL,
+  last_updated   TIMESTAMPTZ NOT NULL,
+  resolved_at    TIMESTAMPTZ,
+  fire_count     INTEGER DEFAULT 1,
+  metadata       JSONB,
+  cooldown_until TIMESTAMPTZ
+);
 
+CREATE INDEX idx_alert_state ON alert_registry(state) WHERE state != 'RESOLVED';
+CREATE INDEX idx_alert_subject ON alert_registry(subject_id, type);
+```
 
-// server/services/forecasting.js
+**`workload_snapshots` — time-series agent utilization**
+```sql
+CREATE TABLE workload_snapshots (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  snapshot_at     TIMESTAMPTZ NOT NULL,
+  agent_id        UUID REFERENCES agents(id),
+  wws             NUMERIC(6,2),
+  utilization_pct NUMERIC(5,2),
+  chat_count      INTEGER,
+  shift_status    TEXT,
+  recorded_at     TIMESTAMPTZ DEFAULT now()
+);
 
-async function recomputeForecastModels(db) {
-    // Pull last 8 weeks of daily demand per package per weekday
-    const history = await db`
-        SELECT
-            EXTRACT(DOW FROM snapshot_date)::int AS weekday,
-            package_breakdown,
-            snapshot_date
-        FROM demand_snapshots
-        WHERE snapshot_date >= CURRENT_DATE - INTERVAL '56 days'
-          AND agent_id IS NOT NULL
-        ORDER BY snapshot_date ASC
-    `;
-    
-    // Aggregate demand per package per weekday
-    const demandByPkgWeekday = aggregateByPackageWeekday(history);
-    
-    for (const [packageName, byWeekday] of Object.entries(demandByPkgWeekday)) {
-        for (const [weekday, series] of Object.entries(byWeekday)) {
-            if (series.length < 3) continue;  // Need at least 3 data points
-            
-            const alpha    = computeOptimalAlpha(series);  // Minimize MSE
-            const ema      = runEma(series, alpha);
-            const stdDev   = computeStdDev(series);
-            const avgDaily = series.reduce((a, b) => a + b, 0) / series.length;
-            const seasonality = ema / (avgDaily || 1);
-            
-            const capacityCfg = await getCapacityConfig(db, packageName);
-            const agentsReq   = staffingRequired(
-                ema, SHIFT_HOURS_BY_PACKAGE[packageName],
-                capacityCfg, { [packageName]: 1.0 }
-            );
-            
-            await db`
-                INSERT INTO forecast_models
-                    (package_name, weekday, alpha, forecast_demand, seasonality_index,
-                     std_deviation, agents_required, confidence_low, confidence_high,
-                     last_computed_at)
-                VALUES
-                    (${packageName}, ${weekday}, ${alpha}, ${ema}, ${seasonality},
-                     ${stdDev}, ${agentsReq},
-                     ${Math.max(0, ema - 1.96 * stdDev)},
-                     ${ema + 1.96 * stdDev},
-                     NOW())
-                ON CONFLICT (package_name, weekday) DO UPDATE SET
-                    alpha              = EXCLUDED.alpha,
-                    forecast_demand    = EXCLUDED.forecast_demand,
-                    seasonality_index  = EXCLUDED.seasonality_index,
-                    std_deviation      = EXCLUDED.std_deviation,
-                    agents_required    = EXCLUDED.agents_required,
-                    confidence_low     = EXCLUDED.confidence_low,
-                    confidence_high    = EXCLUDED.confidence_high,
-                    last_computed_at   = NOW()
-            `;
-        }
-    }
-}
-6.2 What-If Simulation Engine
+CREATE INDEX idx_workload_agent_time ON workload_snapshots(agent_id, snapshot_at DESC);
+CREATE INDEX idx_workload_time ON workload_snapshots(snapshot_at DESC);
+```
 
-// server/routes/what-if.js
+**`ops_score_history` — historical score tracking**
+```sql
+CREATE TABLE ops_score_history (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  scored_at        TIMESTAMPTZ NOT NULL,
+  ops_score        NUMERIC(5,2),
+  sla_health       NUMERIC(5,2),
+  queue_health     NUMERIC(5,2),
+  staffing_health  NUMERIC(5,2),
+  pro_tier_risk    NUMERIC(5,2),
+  capacity_balance NUMERIC(5,2),
+  backlog_risk     NUMERIC(5,2),
+  confidence       TEXT,
+  metadata         JSONB
+);
 
-// POST /api/what-if/simulate
-// Body: { scenario: 'demand_spike'|'agent_absent'|'package_growth', params: {...} }
+CREATE INDEX idx_ops_score_time ON ops_score_history(scored_at DESC);
+```
 
-async function simulateScenario(db, queueEngine, scenario, params) {
-    const baseForecasts = await db`SELECT * FROM forecast_models WHERE weekday = ${getCurrentWeekday()}`;
-    const baseCapacity  = await computeBaseCapacity(db);
-    
-    switch (scenario) {
-        case 'demand_spike': {
-            // "What if demand spikes 50%?"
-            const multiplier = 1 + (params.spikePercent / 100);
-            return runSimulation(baseForecasts.map(f => ({
-                ...f,
-                forecast_demand: Math.round(f.forecast_demand * multiplier),
-            })), baseCapacity);
-        }
-        case 'agent_absent': {
-            // "What if N agents are absent?"
-            const reducedCapacity = {
-                ...baseCapacity,
-                activeAgents: Math.max(0, baseCapacity.activeAgents - params.agentsAbsent),
-            };
-            return runSimulation(baseForecasts, reducedCapacity);
-        }
-        case 'package_growth': {
-            // "What if Fit Solo Pro clients increase 30%?"
-            return runSimulation(baseForecasts.map(f =>
-                f.package_name === params.packageName
-                    ? { ...f, forecast_demand: Math.round(f.forecast_demand * (1 + params.growthPct / 100)) }
-                    : f
-            ), baseCapacity);
-        }
-    }
-}
+**`sla_events` — breach audit log**
+```sql
+CREATE TABLE sla_events (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id   TEXT NOT NULL,
+  agent_id          UUID,
+  package           TEXT,
+  tier              TEXT,
+  event_type        TEXT NOT NULL,  -- 'NEAR_BREACH' | 'BREACH' | 'RESOLVED'
+  sla_deadline      TIMESTAMPTZ,
+  event_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  minutes_overdue   INTEGER,
+  metadata          JSONB
+);
 
-function runSimulation(forecasts, capacity) {
-    const results = [];
-    for (const forecast of forecasts) {
-        const requiredAgents = staffingRequired(
-            forecast.forecast_demand,
-            SHIFT_HOURS_BY_PACKAGE[forecast.package_name],
-            capacityConfigFromForecast(forecast),
-            { [forecast.package_name]: 1.0 }
-        );
-        
-        const agentGap   = requiredAgents - capacity.activeAgents;
-        const slaRisk    = estimateSlaRisk(forecast, capacity);
-        const utilization = estimateUtilization(forecast.forecast_demand, capacity);
-        
-        results.push({
-            package:        forecast.package_name,
-            forecastDemand: forecast.forecast_demand,
-            requiredAgents,
-            agentGap,           // negative = buffer, positive = shortage
-            slaRisk,
-            utilization,
-            recommendation: buildRecommendation(agentGap, slaRisk),
-        });
-    }
-    return results;
-}
-PART 7: OPERATIONAL ALERT ENGINE
-7.1 Alert Trigger Definitions
+CREATE INDEX idx_sla_events_conv ON sla_events(conversation_id, event_at DESC);
+CREATE INDEX idx_sla_events_type ON sla_events(event_type, event_at DESC);
+CREATE INDEX idx_sla_events_agent ON sla_events(agent_id, event_at DESC);
+```
 
-// server/services/alert-engine.js
+**`audit_log` — immutable operations log**
+```sql
+CREATE TABLE audit_log (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  logged_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actor_id    UUID,
+  actor_type  TEXT,
+  action      TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id   TEXT,
+  before_val  JSONB,
+  after_val   JSONB,
+  ip_address  INET,
+  session_id  TEXT
+);
 
-const ALERT_RULES = [
-    {
-        type:      'sla_danger',
-        severity:  (score) => score >= 75 ? 'critical' : 'warning',
-        check:     ({ slaScores }) =>
-            slaScores
-                .filter(s => s.risk_score >= 50)
-                .map(s => ({
-                    title: `${s.package_name} SLA at risk`,
-                    body:  `SLA projected to fall to ${s.projected_sla_eod}% by end of shift.`,
-                    metric_value:     s.projected_sla_eod,
-                    metric_threshold: 90,
-                    package_name:     s.package_name,
-                })),
-    },
-    {
-        type:      'queue_overload',
-        severity:  ({ growthRate }) => growthRate > 10 ? 'critical' : 'warning',
-        check:     ({ queueState }) =>
-            Object.values(queueState)
-                .filter(q => q.growthRate > 5)  // +5 chats/hour
-                .map(q => ({
-                    title: `Queue growing: ${q.package}`,
-                    body:  `Queue increased by ${Math.round(q.growthRate)} chats/hr. Currently ${q.pendingCount} pending.`,
-                    metric_value:     q.growthRate,
-                    metric_threshold: 5,
-                    package_name:     q.package,
-                })),
-    },
-    {
-        type:      'no_reply_risk',
-        severity:  () => 'critical',
-        check:     ({ queueState }) =>
-            Object.values(queueState)
-                .filter(q => q.nearBreachCount >= 1)
-                .map(q => ({
-                    title: `${q.nearBreachCount} ${q.package} chat(s) near SLA breach`,
-                    body:  `Oldest waiting: ${Math.round(q.maxWaitMinutes)}m. SLA window: ${SLA_RULES[q.package].maxMinutes}m.`,
-                    metric_value:     q.nearBreachCount,
-                    metric_threshold: 1,
-                    package_name:     q.package,
-                })),
-    },
-    {
-        type:      'agent_overload',
-        severity:  ({ score }) => score > 100 ? 'critical' : 'warning',
-        check:     ({ agentUtilizations }) =>
-            agentUtilizations
-                .filter(a => a.utilizationScore > 85)
-                .map(a => ({
-                    title:    `${a.agent_name} utilization critical`,
-                    body:     `Utilization at ${Math.round(a.utilizationScore)}%. Consider reassigning ${Math.ceil(a.overloadChats)} chats.`,
-                    agent_id: a.agent_id,
-                    metric_value:     a.utilizationScore,
-                    metric_threshold: 85,
-                })),
-    },
-    {
-        type:      'inactive_agent',
-        severity:  () => 'warning',
-        check:     ({ agentStatuses }) =>
-            agentStatuses
-                .filter(a => a.status === 'idle' && a.idleSinceMinutes > 15)
-                .map(a => ({
-                    title:    `${a.name} has been idle ${Math.round(a.idleSinceMinutes)}m`,
-                    body:     `Agent online but no sessions. ${pendingQueueDepth} chats pending.`,
-                    agent_id: a.agent_id,
-                    metric_value:     a.idleSinceMinutes,
-                    metric_threshold: 15,
-                })),
-    },
-    {
-        type:      'workload_imbalance',
-        severity:  () => 'warning',
-        check:     ({ agentLoads }) => {
-            const gini = workloadFairness(agentLoads.map(a => a.weightedLoad));
-            if (gini < 0.35) return [];
-            const overloaded  = agentLoads.reduce((m, a) => a.weightedLoad > m.weightedLoad ? a : m);
-            const underloaded = agentLoads.reduce((m, a) => a.weightedLoad < m.weightedLoad ? a : m);
-            const chatsDiff   = Math.round((overloaded.weightedLoad - underloaded.weightedLoad) / 2);
-            return [{
-                title: 'Workload imbalance detected',
-                body: `Reassign ~${chatsDiff} chats from ${overloaded.name} to ${underloaded.name}`,
-                metric_value:     gini,
-                metric_threshold: 0.35,
-            }];
-        },
-    },
-];
-7.2 Alert Deduplication
+CREATE INDEX idx_audit_time ON audit_log(logged_at DESC);
+CREATE INDEX idx_audit_actor ON audit_log(actor_id, logged_at DESC);
+CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id, logged_at DESC);
+```
 
-async function shouldEmitAlert(db, alertType, packageName, agentId) {
-    // Suppress if same alert type fired in last 15 minutes and hasn't resolved
-    const recent = await db`
-        SELECT id FROM operational_alerts
-        WHERE alert_type     = ${alertType}
-          AND package_name   IS NOT DISTINCT FROM ${packageName}
-          AND agent_id       IS NOT DISTINCT FROM ${agentId}
-          AND auto_resolved  = FALSE
-          AND created_at     >= NOW() - INTERVAL '15 minutes'
-        LIMIT 1
-    `;
-    return recent.length === 0;
-}
-PART 8: REAL-TIME UPDATE STRATEGY
-8.1 Server-Sent Events (SSE)
-Replace all polling from the frontend with SSE for push-based updates. SSE is simpler than WebSockets for one-way server → client data, works with the existing Express setup, and requires no new dependencies.
+### 8.2 Retention Policy
 
+| Table | Retention | Strategy |
+|---|---|---|
+| queue_state | Live only | Truncate on resolution |
+| workload_snapshots | 90 days | Partition by month |
+| ops_score_history | 180 days | Partition by month |
+| sla_events | 365 days | Archive to cold storage |
+| audit_log | Indefinite | Append-only, compress after 90 days |
+| alert_registry | 30 days resolved | Auto-archive resolved alerts |
 
-// server/routes/sse.js
+---
 
-const clients = new Set();
+## 9. UI/UX Redesign Plan
 
-router.get('/api/stream', requireAdmin, (req, res) => {
-    res.setHeader('Content-Type',  'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection',    'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');  // Important for nginx proxy
-    res.flushHeaders();
-    
-    const client = { res, connectedAt: Date.now() };
-    clients.add(client);
-    
-    // Send initial state immediately
-    sendEvent(client, 'init', {
-        queue:   queueEngine.state,
-        agents:  agentService.currentStatuses,
-        alerts:  alertService.recentAlerts,
-    });
-    
-    // Heartbeat every 30s to keep connection alive
-    const heartbeat = setInterval(() => {
-        res.write(':heartbeat\n\n');
-    }, 30_000);
-    
-    req.on('close', () => {
-        clearInterval(heartbeat);
-        clients.delete(client);
-    });
-});
+### 9.1 Command Center Layout
 
-function broadcast(eventType, data) {
-    const payload = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const client of clients) {
-        try {
-            client.res.write(payload);
-        } catch {
-            clients.delete(client);
-        }
-    }
-}
+```
+┌──────────────────────────────────────────────────────────────┐
+│  HEADER BAR: Ops Score [71] │ Shift Status │ Live Clock      │
+│             Alert Count [3] │ Queue [47]   │ Refresh         │
+├────────────┬─────────────────────────────┬───────────────────┤
+│            │                             │                   │
+│  ALERT     │   QUEUE TABLE               │  STAFFING         │
+│  PANEL     │   (sortable / filterable)   │  PANEL            │
+│  (5 rows)  │   Full width, compact rows  │  Agent cards      │
+│            │                             │  WWS bar          │
+│            │                             │  Shift status     │
+├────────────┴─────────────────────────────┴───────────────────┤
+│  METRICS ROW: SLA Health │ Queue Flow │ Capacity │ Breaches  │
+├──────────────────────────────────────────────────────────────┤
+│  FORECAST ROW: Breach Wave │ Drain Time │ Demand Curve       │
+└──────────────────────────────────────────────────────────────┘
+```
 
-// Called by queue engine, alert engine, etc.
-export { broadcast };
-8.2 Frontend SSE Client
+### 9.2 Information Density System
 
-// In ops-center.html
-class OpsStream {
-    constructor(onUpdate) {
-        this.onUpdate = onUpdate;
-        this.connect();
-    }
-    
-    connect() {
-        this.es = new EventSource('/api/stream');
-        
-        this.es.addEventListener('queue_update',  e => this.onUpdate('queue',  JSON.parse(e.data)));
-        this.es.addEventListener('sla_risk',       e => this.onUpdate('sla',    JSON.parse(e.data)));
-        this.es.addEventListener('agent_status',   e => this.onUpdate('agents', JSON.parse(e.data)));
-        this.es.addEventListener('alert',          e => this.onUpdate('alert',  JSON.parse(e.data)));
-        this.es.addEventListener('init',           e => this.onUpdate('init',   JSON.parse(e.data)));
-        
-        this.es.onerror = () => {
-            this.es.close();
-            setTimeout(() => this.connect(), 5_000);  // Auto-reconnect after 5s
-        };
-    }
-}
-8.3 Update Frequency Matrix
-Data Type	Source	Frequency	Method
-Queue state (per package)	Supabase RPC	Every 60s	SSE push after each poll
-Agent status (on/off/idle)	PostgreSQL	Every 30s	SSE push after each poll
-SLA risk scores	Computed	Every 15 min	SSE push after engine run
-Operational alerts	Triggered	On event	SSE immediate push
-Hourly heatmap	Computed	Every 5 min	SSE push
-KPI bar (queue, score)	Derived	After any update	Frontend recompute
-Forecast models	Historical	Nightly (00:00)	No SSE needed
-Agent occupancy detail	PostgreSQL	Every 2 min	Polling (lower priority)
-PART 9: FRONTEND COMPONENT ARCHITECTURE
-9.1 Recommended Technology
-Do not migrate to React — the overhead is not justified for this codebase. Instead, add Alpine.js (CDN, no build step required) for reactive data binding. It works within the existing HTML/vanilla JS pattern.
+**Compact Card Spec (metric cards):**
+- Height: 56px
+- Label: 11px, muted
+- Value: 24px bold
+- Trend indicator: 12px, right-aligned
+- Color stripe: 4px left border = status color
 
+**Queue Table Row Spec (36px row height):**
 
-<!-- Add to ops-center.html head -->
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-9.2 Component Hierarchy
+| Column | Width | Content |
+|---|---|---|
+| Priority # | 28px | Rank |
+| Urgency badge | 48px | CRITICAL / HIGH / MED / LOW |
+| Client name | 120px | Full name |
+| Package tier chip | 72px | PRO / STD / EXP |
+| Agent | 100px | Assigned agent |
+| TTB countdown | 80px | `14m 22s` |
+| Queue age | 64px | `2h 15m` |
+| Last msg side | 24px | Client/Staff icon |
+| Action | 32px | Reassign button |
 
-ops-center.html
-├── <x-alert-bar>           — Sticky top, critical alerts only, auto-dismiss
-├── <x-kpi-header>          — Sticky sub-header with 6 KPI pills + live dot
-│
-├── Tab: LIVE OPS
-│   ├── <x-exec-summary>    — Ops health score card (5 sub-scores)
-│   ├── <x-queue-monitor>   — Queue overview
-│   │   ├── <x-queue-card pkg="Fit Solo Pro">
-│   │   │   ├── Pending count (large number)
-│   │   │   ├── Severity badge (green/yellow/red)
-│   │   │   ├── Oldest wait (mm:ss countdown)
-│   │   │   ├── Near-breach count
-│   │   │   └── Growth rate arrow (+N/hr)
-│   │   └── [repeated per package]
-│   ├── <x-agent-grid>      — Live agent status cards
-│   │   ├── <x-agent-card>
-│   │   │   ├── Status dot (on-shift, idle, in-session, break)
-│   │   │   ├── Utilization bar
-│   │   │   ├── Active chats / pending
-│   │   │   ├── Last activity (mm ago)
-│   │   │   └── Burnout risk indicator
-│   │   └── [repeated per agent]
-│   └── <x-alerts-feed>     — Scrollable live alert stream
-│
-├── Tab: SLA ENGINE
-│   ├── <x-sla-risk-grid>   — Risk score cards per package
-│   │   ├── Risk gauge (0–100)
-│   │   ├── Current SLA %
-│   │   ├── Projected EOD SLA %
-│   │   └── Breach count prediction
-│   └── <x-sla-projection-chart>  — Dual-axis: projected queue vs SLA %
-│
-├── Tab: AGENT OPS
-│   ├── <x-agent-table>     — Sortable table: all metrics per agent
-│   ├── <x-workload-bar-chart>   — Horizontal bar: weighted load per agent
-│   ├── <x-fairness-gauge>  — Gini coefficient visualization
-│   └── <x-reassign-panel>  — Recommended reassignments with action buttons
-│
-├── Tab: PLANNING
-│   ├── <x-hourly-heatmap>  — Day × Hour grid (colour = demand intensity)
-│   ├── <x-staffing-chart>  — Stacked bars: required vs actual per hour
-│   ├── <x-forecast-panel>  — Weekly forecast cards with confidence bands
-│   └── <x-what-if-panel>   — Scenario simulator with sliders + result cards
-│
-├── Tab: ALERTS
-│   └── <x-alert-log>       — Full alert history, filterable, acknowledgeable
-│
-└── Tab: HISTORY
-    └── [existing demand-report.html content, embedded via iframe or migrated]
-9.3 KPI Header Design
+### 9.3 Breach Wave Display
 
-┌───────────────────────────────────────────────────────────────────────────────┐
-│  ● LIVE    OPS SCORE: 84      SLA: 91%      QUEUE: 23     AGENTS: 7/9 ON     │
-│             [healthy ▲]       [warning ▼]  [yellow ●]    [burnout: 1]         │
-│                                                              Updated: 0:42 ago  │
-└───────────────────────────────────────────────────────────────────────────────┘
-Each pill is clickable — it deep-links to the relevant section.
+```
+┌─────────────────────────────────────┐
+│  SLA BREACH WAVES                   │
+│                                     │
+│  ⚠ 3 chats breaching in 15 min     │  RED, pulsing
+│  ▲ 7 chats breaching in 30 min     │  ORANGE
+│  ● 12 chats breaching in 60 min    │  YELLOW
+│                                     │
+│  PRO: 1 critical │ STD: 2 high     │
+└─────────────────────────────────────┘
+```
 
-9.4 Operational Health Score Computation
+### 9.4 Agent Utilization Card (compact)
 
-function computeOpsHealthScore({ slaScores, queueState, agentStatuses, utilizationScores }) {
-    // Each component scored 0–100, then weighted
-    
-    const slaHealth = Math.min(...slaScores.map(s => s.projected_sla_eod ?? 100));
-    // Use worst-case package SLA projection
-    
-    const queueHealth = 100 - Math.min(100,
-        Object.values(queueState)
-            .filter(q => !SLA_RULES[q.package]?.is_scheduled)
-            .reduce((max, q) => Math.max(max, (q.severity === 'red' ? 60 : q.severity === 'yellow' ? 25 : 0)), 0)
-    );
-    
-    const staffingHealth = clamp(
-        (agentStatuses.filter(a => a.status === 'on_shift').length /
-         Math.max(agentStatuses.length, 1)) * 100,
-        0, 100
-    );
-    
-    const loadHealth = 100 - Math.min(100,
-        utilizationScores.reduce((sum, u) => sum + Math.max(0, u.utilizationScore - 70), 0) / 
-        Math.max(utilizationScores.length, 1)
-    );
-    
-    return Math.round(
-        slaHealth      * 0.40 +
-        queueHealth    * 0.30 +
-        staffingHealth * 0.15 +
-        loadHealth     * 0.15
-    );
-}
-9.5 Recommended Charts & Widgets
-Widget	Library	Type	Data Source
-Ops Health Score	Chart.js Doughnut	Gauge-style	Computed
-SLA Risk by Package	Chart.js Bar	Horizontal bar, colour-coded	sla_risk_scores
-SLA Projection	Chart.js Line	Dual-axis (queue + SLA %)	SLA engine
-Hourly Heatmap	Custom SVG grid	7×24 coloured cells	hourly_demand_snapshots
-Queue Trend	Chart.js Line	Sparkline, last 3h	queue_snapshots
-Utilization per Agent	Chart.js Bar	Horizontal, threshold lines	Computed
-Workload Fairness	D3.js (or Chart.js)	Lorenz curve	Agent loads
-Forecast Bands	Chart.js Line	Line + shaded area	forecast_models
-Agent Occupancy	CSS progress bars	Inline bars	Live
-Burnout Risk	CSS heatmap dots	3-level colour	Computed
-PART 10: PERFORMANCE OPTIMIZATION
-10.1 Backend Optimizations
-Problem: Current GET /api/sla-stats fetches all rooms then all messages — O(N×M) Supabase RPC calls with up to 25 concurrent workers.
+```
+┌─────────────────────────────────────────┐
+│  Manar           ● ON SHIFT    98% ████▓│
+│  6 chats │ WWS 7.5/7.65 │ 2 PRO active │
+│  ⚠ OVERLOADED — reassign 2 chats       │
+├─────────────────────────────────────────┤
+│  Mahmoud         ● ON SHIFT    52% ███░ │
+│  4 chats │ WWS 4.0/7.65 │ AVAILABLE    │
+└─────────────────────────────────────────┘
+```
 
-Solution:
+### 9.5 Operational Ergonomics
 
+- **Keyboard shortcuts:**
+  - `Q` — focus queue filter
+  - `A` — focus alert panel
+  - `R` — force refresh
+  - `Esc` — clear selection
+- One-click reassignment from queue row → agent dropdown
+- Alert dismiss with mandatory reason (feeds audit log)
+- Sticky column headers on queue table while scrolling
+- Visual urgency heatmap: row background intensity scales with priority score
 
-// Paginate with a single cursor-based fetch, not a count query first
-// Cache intermediate results per date range in daily_stats_cache
-// Add in-memory result cache with 5-minute TTL for repeated reads
+### 9.6 Color System
 
-const RESULT_CACHE = new Map();  // key → { data, expiresAt }
+| Meaning | Color |
+|---|---|
+| Critical / Breach | `#dc2626` (red-600) |
+| Warning / Elevated | `#ea580c` (orange-600) |
+| Caution / Near-breach | `#d97706` (amber-600) |
+| Normal / Online | `#16a34a` (green-600) |
+| Off shift / Inactive | `#6b7280` (gray-500) |
+| PRO tier indicator | `#7c3aed` (violet-600) |
+| EXPRESS tier indicator | `#0284c7` (sky-600) |
 
-function withCache(key, ttlMs, fetchFn) {
-    const cached = RESULT_CACHE.get(key);
-    if (cached && Date.now() < cached.expiresAt) return cached.data;
-    const data = fetchFn();
-    RESULT_CACHE.set(key, { data, expiresAt: Date.now() + ttlMs });
-    return data;
-}
-N+1 Query Fix for Overview:
+### 9.7 Mobile Responsiveness
 
+- Below 768px: single-column feed layout
+- Queue table → swipeable cards on mobile
+- Agent cards → stacked vertical layout
+- Alerts → full-width banner at top
+- Ops Score → fixed bottom bar on mobile
 
--- Replace per-agent queries in GET /api/overview with single CTE
-WITH active_shifts AS (
-    SELECT agent_id, id, shift_started_at FROM shifts
-    WHERE shift_ended_at IS NULL
-),
-active_breaks AS (
-    SELECT agent_id, started_at FROM shift_breaks
-    WHERE ended_at IS NULL
-),
-last_sessions AS (
-    SELECT DISTINCT ON (agent_id)
-        agent_id, id, ended_at, clicked_at
-    FROM sessions
-    ORDER BY agent_id, clicked_at DESC
-)
-SELECT
-    a.id, a.name, a.status_updated_at,
-    acs.id            AS active_shift_id,
-    acs.shift_started_at,
-    ab.started_at     AS break_started_at,
-    ls.id             AS last_session_id,
-    ls.ended_at       AS last_session_ended_at
-FROM agents a
-LEFT JOIN active_shifts acs ON acs.agent_id = a.id
-LEFT JOIN active_breaks ab  ON ab.agent_id  = a.id
-LEFT JOIN last_sessions ls  ON ls.agent_id  = a.id
-WHERE a.is_active = TRUE;
-Index additions:
+---
 
+## 10. Advanced Operational Features
 
--- For queue_snapshots time-range lookups
-CREATE INDEX idx_queue_snapshots_pkg_time
-    ON queue_snapshots(package_name, snapshot_at DESC);
+### 10.1 Staffing Simulator
 
--- For SLA risk history
-CREATE INDEX idx_sla_risk_pkg_time
-    ON sla_risk_scores(package_name, computed_at DESC);
+Answers the question: "What happens if I add/remove an agent?"
 
--- For alert filtering
-CREATE INDEX idx_alerts_unacked
-    ON operational_alerts(severity, created_at DESC)
-    WHERE is_acknowledged = FALSE;
+**Inputs:** current queue state, current workload distribution, proposed staffing change
 
--- For hourly heatmap
-CREATE INDEX idx_hourly_snap_pkg_date
-    ON hourly_demand_snapshots(package_name, snapshot_date, snapshot_hour);
-10.2 Supabase RPC Batching
-The current code makes one RPC call per agent for demand. Batch using a single RPC call with a staff_id array:
+**Outputs:**
+- Projected TTB for each breach-risk chat
+- New team utilization %
+- Estimated breach count under new staffing
+- Recommended action: "Add 1 agent to cover Pro queue"
 
+**What-if scenarios:**
+```
+Scenario A: "Remove agent X"     → show utilization spike + breach risk
+Scenario B: "Add agent X"        → show capacity relief + drain time
+Scenario C: "All agents on break"→ show blackout risk window
+```
 
-// Instead of: for each agent → supabase.rpc(...)
-// Do: one RPC with all staff IDs
+### 10.2 Forecasting Engine
 
-const { data } = await supabase.rpc('get_bulk_pending_counts', {
-    p_staff_ids: agents.map(a => a.fitstn_id),
-    p_last_message_from: 'client',
-});
-// Returns: [{ staff_id, count }]
-// Requires adding this RPC to the Supabase schema
-10.3 SSE Fan-out Optimization
-With many concurrent dashboard viewers, avoid recomputing the SSE payload for each subscriber:
+**Demand Forecasting:**
+```
+Use historical conversation volumes by:
+  - Hour of day
+  - Day of week
+  - Package distribution
 
+Model: Weighted moving average (7-day rolling)
+Output: Projected hourly incoming rate for next 8 hours
+```
 
-function broadcast(eventType, data) {
-    const payload = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
-    // Serialize once, fan out to all N clients — O(N) writes, O(1) serialization
-    for (const client of clients) {
-        client.res.write(payload);
-    }
-}
-PART 11: IMPLEMENTATION ROADMAP
-Phase 1 — Foundation (Week 1–2)
-These changes unlock everything else.
+**Staffing Recommendation:**
+```
+Required_Agents = ceil(Projected_Demand_WWS / Agent_Max_WWS)
+Minimum_Coverage = Required_Agents + 1  (redundancy buffer)
+```
 
-Run schema migrations: add queue_state, operational_alerts, agent_capacity_config, hourly_demand_snapshots, fit_express_schedule, sla_risk_scores, forecast_models
-Seed agent_capacity_config with the values from the formula section
-Add SSE endpoint (GET /api/stream) and broadcast helper
-Build QueueEngine service — replace the ad-hoc Supabase RPC calls in agent-demand and agent-workload
-Add GET /api/queue-state — returns current queueEngine.state as JSON (for initial page load)
-Fix the N+1 overview query using the CTE above
-Extend the hourly snapshot cronjob to write to hourly_demand_snapshots (per package breakdown)
-Phase 2 — Live Ops Tab (Week 2–3)
-Build ops-center.html skeleton with sticky KPI header and alert bar
-Wire SSE client — replaces all setInterval polling on this page
-Build Queue Monitor section with severity cards
-Build Agent Live Grid with utilization bars and burnout indicators
-Build Alerts Feed (live stream, acknowledge button)
-Build Executive Summary card with health score
-Phase 3 — SLA Engine Tab (Week 3–4)
-Build SlaEngine service — runs every 15 minutes, writes to sla_risk_scores
-Wire AlertEngine — reads from SLA engine + queue engine, writes to operational_alerts
-Build SLA Risk Grid with risk gauges
-Build SLA Projection chart (dual axis)
-Phase 4 — Agent Ops Tab (Week 4–5)
-Redesign utilization formula with package weights and concurrency
-Add Gini fairness metric to API
-Build Agent Ops tab: sortable table, workload bars, fairness gauge
-Build reassignment recommendations
-Phase 5 — Planning Tab (Week 5–6)
-Build nightly forecast model recomputation
-Build hourly heatmap
-Build staffing coverage chart
-Build What-If simulator (3 scenarios: demand spike, agent absent, package growth)
-Phase 6 — Polish & Hardening (Week 6–7)
-Add Fit Express scheduler as scheduled workload
-Add agent_capacity_config admin UI (editable in settings.html)
-Dark mode CSS implementation
-Fix debt items: input validation, N+1 in shifts.js
-Performance audit: cache all SLA computations, batch Supabase RPC calls
-SUMMARY OF NEW ENDPOINTS
-Method	Path	Purpose
-GET	/api/stream	SSE live update stream
-GET	/api/queue-state	Current queue per package
-GET	/api/sla-risk	Current SLA risk scores
-GET	/api/ops-health	Executive health score + components
-GET	/api/alerts?unacked=true	Operational alerts (filterable)
-POST	/api/alerts/:id/acknowledge	Acknowledge alert
-GET	/api/hourly-heatmap?date=	24-hour demand by package
-GET	/api/forecast?weekday=	Demand + staffing forecast
-POST	/api/what-if/simulate	Run scenario simulation
-GET	/api/capacity-config	Package capacity settings
-PUT	/api/capacity-config/:package	Update capacity config
-GET	/api/fit-express-schedule?date=	Fit Express follow-up tracker
-GET	/api/agent-fairness	Workload fairness scores
-GET	/api/reassign-recommendations	Suggested reassignments
-The architecture gives you a true operations command center built on your existing Express + PostgreSQL + Supabase stack with no framework migration required. The SSE layer is the single biggest unlock — once that's in, every subsequent feature is additive.
+**Surge Detection:**
+```
+If actual_incoming_rate > forecast × 1.4 for 2 consecutive windows:
+  → SURGE ALERT: demand exceeds forecast by X%
+  → Trigger staffing review notification
+```
 
-Start with Phase 1 migrations and the QueueEngine service. That's the load-bearing foundation everything else sits on.
+### 10.3 Anomaly Detection
+
+| Anomaly | Detection Rule |
+|---|---|
+| Sudden queue spike | queue_size > 3σ above rolling average |
+| Agent burnout risk | utilization > 90% for > 45 minutes |
+| Unusual silence | agent 0 chats handled in last 30 min during shift |
+| Client surge | incoming rate doubles vs prior hour |
+| SLA breach cluster | 3+ breaches in 10-minute window |
+
+### 10.4 Premium Client Protection System
+
+For PRO tier (Fit Solo Pro, Fit Fam Pro):
+
+- **Dedicated queue lane** — PRO chats always render at top with purple badge
+- **Dedicated alert type** — `PRO_TIER_AT_RISK` fires independently
+- **Auto-escalation:** If PRO chat has no response in 45 min → notify admin directly
+- **Minimum dedicated capacity:** Warn if no agent has capacity < 60% when PRO chats are pending
+- **Breach post-mortem:** Every PRO breach logged to `sla_events` with full context
+
+### 10.5 Reassignment Engine
+
+```
+1. Manager sees: "Manar: 98% utilization, 2 Pro chats, 3 Standard chats"
+2. System suggests: "Move 2 Standard chats to Mahmoud (52% utilization)"
+3. Manager clicks "Reassign" on queue row
+4. System:
+   a. Updates conversation assignment in DB
+   b. Notifies receiving agent
+   c. Logs to audit_log
+   d. Recalculates workload for both agents
+   e. Emits QUEUE_UPDATE via WebSocket
+```
+
+---
+
+## 11. Implementation Roadmap
+
+### Phase 1 — Foundation Fix (Weeks 1–2)
+**Priority: CRITICAL — Restores system trust**
+
+| Task | Complexity | Impact |
+|---|---|---|
+| Fix shift detection engine | Medium | Eliminates "0 agents on shift" bug |
+| Implement WWS utilization model | Medium | Fixes utilization inversion bug |
+| Working-hours-aware SLA engine | Medium | Accurate TTB countdowns |
+| Stateful alert engine with deduplication | Medium | Eliminates alert fatigue |
+| Ops Score with transparent formula | Low | Trustworthy scoring |
+
+**Dependencies:** None — these are self-contained service rewrites.
+**Expected Impact:** Dashboard becomes operationally trustworthy.
+
+---
+
+### Phase 2 — Queue Intelligence (Weeks 3–4)
+**Priority: HIGH — Enables actionable operations**
+
+| Task | Complexity | Impact |
+|---|---|---|
+| Live queue table with all fields | Medium | Per-chat visibility |
+| Priority score engine | Medium | Correct sorting and urgency |
+| Time-to-breach countdown per row | Low | Breach prevention |
+| Breach wave forecasting panel | Medium | Proactive staffing |
+| Queue flow metrics (velocity, drain) | Low | Queue health awareness |
+
+**Dependencies:** Phase 1 SLA engine.
+**Expected Impact:** Managers can act on at-risk chats before breach.
+
+---
+
+### Phase 3 — Workforce Intelligence (Weeks 5–7)
+**Priority: HIGH — Enables capacity management**
+
+| Task | Complexity | Impact |
+|---|---|---|
+| Agent concurrency tracking | Medium | True capacity visibility |
+| Effective capacity calculation | Low | Structural overload detection |
+| Reassignment engine UI | Medium | Workload balancing |
+| Staffing simulator | High | What-if planning |
+| PRO client protection system | Medium | Premium SLA defense |
+
+**Dependencies:** Phase 2 queue engine.
+**Expected Impact:** Managers can redistribute load and prevent systemic overload.
+
+---
+
+### Phase 4 — Predictive & Enterprise (Weeks 8–12)
+**Priority: MEDIUM — Reactive ops → proactive command center**
+
+| Task | Complexity | Impact |
+|---|---|---|
+| Demand forecasting engine | High | Staffing pre-planning |
+| Anomaly detection | High | Early warning system |
+| Audit log implementation | Medium | Compliance & accountability |
+| Historical analytics | High | Pattern recognition |
+| UI density redesign (Ops Center) | High | Operational ergonomics |
+| WebSocket push architecture | High | Real-time reactivity |
+| Mobile-responsive layout | Medium | On-the-go monitoring |
+
+**Dependencies:** Phases 1–3 complete.
+**Expected Impact:** Predictive enterprise command center.
+
+---
+
+## 12. Enterprise-Grade Improvements
+
+### 12.1 Observability
+
+- **`/metrics` endpoint:** ops engine cycle time, queue size, alert count, DB query latency
+- **`/health` endpoint:** engine status, data freshness, last tick time
+- **Slow query logging:** flag any DB query > 200ms with full context
+- **Error boundary logging:** all engine errors logged with stack trace + operational context
+
+### 12.2 Audit Log
+
+Every state-changing action writes to `audit_log`:
+- Manual reassignment
+- Alert dismiss/acknowledge
+- Settings change
+- Shift override
+- Manual SLA exception
+
+Each entry: `actor`, `action`, `entity`, `before`, `after`, `timestamp`, `ip`.
+
+### 12.3 SLA Auditability
+
+For every SLA breach:
+1. Log to `sla_events` with full context (agent, queue age, package, assigned time)
+2. Compute: was breach preventable? (agent had capacity before breach)
+3. Generate weekly SLA breach report by agent, package, time-of-day
+4. Track **Mean Time to Respond (MTTR)** per package tier
+
+### 12.4 Incident Management
+
+When Ops Score drops below 40 (CRITICAL):
+1. Trigger `INCIDENT_DECLARED` alert
+2. Log incident start to `incidents` table
+3. Capture operational snapshot at incident time
+4. Track incident duration and resolution
+5. Post-incident: auto-generate summary (score drop causes, resolution)
+
+### 12.5 Historical Analytics
+
+Retain and expose:
+- Hourly queue size over past 30 days
+- Daily SLA breach rate by package
+- Agent utilization trends (weekly)
+- Ops score trend (daily)
+- Peak demand windows (day of week × hour)
+- Breach pattern analysis (recurring breach times = structural problem)
+
+### 12.6 Replay System
+
+For incident investigation:
+- Record queue state snapshots every 5 minutes
+- Replay endpoint: `/ops/replay?from=T1&to=T2`
+- Reconstruct what the dashboard showed at any past moment
+- Use case: "why did 3 chats breach at 2pm on Tuesday?"
+
+---
+
+## Summary: Critical Path
+
+```
+Weeks 1–2:  Phase 1 — Shift fix + WWS utilization + Alert dedup + Ops Score
+Weeks 3–4:  Phase 2 — Queue table + TTB engine + Breach waves
+Weeks 5–7:  Phase 3 — Reassignment + Capacity model + PRO protection
+Weeks 8–12: Phase 4 — Forecasting + Anomaly detection + UI redesign + WebSocket
+```
+
+**After Phase 1** — Operationally trustworthy
+**After Phase 2** — Actionable
+**After Phase 3** — Manageable at scale
+**After Phase 4** — Predictive enterprise command center
+
+---
+
+*FitStn Follow-Up Operations | Confidential | 2026-05-17*
