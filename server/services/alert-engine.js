@@ -1,8 +1,22 @@
-// AlertEngine — runs every 5 minutes, evaluates alert rules against live queue
-// and SLA data, writes new alerts to operational_alerts (with 15-min dedup),
-// and broadcasts each new alert via SSE.
+// AlertEngine v2 — stateful alert lifecycle with fingerprint deduplication.
+//
+// Fixes D3: same alert no longer repeats every 5 minutes.
+// Each alert has a state machine: started → worsening|stable|improving → escalated → resolved.
+// A fingerprint (sha1 of alert_type:package:agent) ensures only ONE open alert per scope.
+// Transitions are logged to alert_transitions for audit.
+
+const crypto = require('crypto');
 
 const ALERT_INTERVAL_MS = 5 * 60 * 1000;
+
+// State machine transitions:
+//   started → worsening | stable | improving
+//   worsening → escalated | stable | improving
+//   stable → worsening | improving
+//   improving → worsening | stable | resolved (after cooldown)
+//   escalated → stable | improving
+//   resolved — terminal (open index removed)
+const OPEN_STATES = new Set(['started', 'worsening', 'stable', 'improving', 'escalated']);
 
 function gini(loads) {
     if (loads.length < 2) return 0;
@@ -16,19 +30,64 @@ function gini(loads) {
     return sumDiffs / (2 * n * n * mean);
 }
 
+function fingerprint(alertType, packageName, agentId) {
+    const raw = `${alertType}:${packageName ?? '∅'}:${agentId ?? '∅'}`;
+    return crypto.createHash('sha1').update(raw).digest('hex').slice(0, 16);
+}
+
+// Thresholds loaded from ops_config at engine start (falls back to compile-time defaults)
+const DEFAULTS = {
+    'alert.sla_danger.risk_threshold':       50,
+    'alert.sla_danger.critical_threshold':   75,
+    'alert.queue_overload.growth_warn':       5,
+    'alert.queue_overload.growth_critical':  10,
+    'alert.agent_overload.pending_warn':     20,
+    'alert.agent_overload.pending_critical': 35,
+    'alert.inactive_agent.idle_minutes':     15,
+    'alert.workload_imbalance.gini':         0.35,
+    'alert.cooldown.sla_danger_min':         10,
+    'alert.cooldown.agent_overload_min':     15,
+    'alert.cooldown.queue_overload_min':     10,
+    'alert.cooldown.inactive_agent_min':      5,
+    'alert.cooldown.workload_imbalance_min': 20,
+    'alert.escalate.sla_danger_min':         20,
+    'alert.escalate.agent_overload_min':     30,
+    'alert.escalate.queue_overload_min':     15,
+};
+
+const COOLDOWN_KEY = {
+    sla_danger:          'alert.cooldown.sla_danger_min',
+    agent_overload:      'alert.cooldown.agent_overload_min',
+    queue_overload:      'alert.cooldown.queue_overload_min',
+    inactive_agent:      'alert.cooldown.inactive_agent_min',
+    workload_imbalance:  'alert.cooldown.workload_imbalance_min',
+};
+const ESCALATE_KEY = {
+    sla_danger:          'alert.escalate.sla_danger_min',
+    agent_overload:      'alert.escalate.agent_overload_min',
+    queue_overload:      'alert.escalate.queue_overload_min',
+};
+
 class AlertEngine {
-    constructor({ sql, queueEngine, slaEngine, broadcast }) {
-        this.sql         = sql;
-        this.queueEngine = queueEngine;
-        this.slaEngine   = slaEngine;
-        this.broadcast   = broadcast;
-        this._timer      = null;
+    constructor({ sql, queueEngine, slaEngine, presenceService, broadcast }) {
+        this.sql             = sql;
+        this.queueEngine     = queueEngine;
+        this.slaEngine       = slaEngine;
+        this.presenceService = presenceService;
+        this.broadcast       = broadcast;
+        this._timer          = null;
+
+        // In-memory index: fingerprint → open alert row
+        this._openByFp = new Map();
+
+        // Config cache (reloaded every run)
+        this._cfg = { ...DEFAULTS };
     }
 
     start() {
         this._runSafe();
         this._timer = setInterval(() => this._runSafe(), ALERT_INTERVAL_MS);
-        console.log('[AlertEngine] started — runs every 5 min');
+        console.log('[AlertEngine] started — stateful mode, runs every 5 min');
     }
 
     stop() { if (this._timer) clearInterval(this._timer); }
@@ -42,20 +101,98 @@ class AlertEngine {
     }
 
     async _check() {
+        await this._reloadConfig();
+        await this._loadOpenAlerts();
+
         const queueState = this.queueEngine.getState();
         const slaScores  = this.slaEngine.getScores();
         const agents     = await this._agentStatuses();
 
-        const candidates = [];
+        const candidates = this._buildCandidates(queueState, slaScores, agents);
 
-        // ── 1. SLA danger ────────────────────────────────────────────────────
+        const seenFps = new Set();
+        let transitions = 0;
+
+        // ── Process each candidate ───────────────────────────────────────────
+        for (const c of candidates) {
+            const fp  = fingerprint(c.alert_type, c.package_name, c.agent_id);
+            seenFps.add(fp);
+            const cur = this._openByFp.get(fp);
+
+            if (!cur) {
+                // New alert
+                const row = await this._insertAlert(c, fp);
+                if (row) {
+                    this._openByFp.set(fp, row);
+                    this._broadcast(row);
+                    transitions++;
+                }
+                continue;
+            }
+
+            // Existing open alert — compute trend
+            const trend     = this._trend(c.alert_type, cur.metric_value, c.metric_value);
+            const ageMin    = (Date.now() - new Date(cur.created_at).getTime()) / 60_000;
+            const escalKey  = ESCALATE_KEY[c.alert_type];
+            const escalMin  = escalKey ? this._cfg[escalKey] : Infinity;
+
+            let nextState = cur.state;
+            if (trend === 'worsening') {
+                nextState = (ageMin >= escalMin && cur.state !== 'escalated') ? 'escalated' : 'worsening';
+            } else if (trend === 'improving') {
+                nextState = 'improving';
+            } else {
+                nextState = 'stable';
+            }
+
+            if (nextState !== cur.state || Math.abs(c.metric_value - cur.metric_value) > 0.01) {
+                await this._transition(cur, nextState, c.metric_value, trend);
+                this._openByFp.set(fp, { ...cur, state: nextState, metric_value: c.metric_value, last_evaluated_at: new Date() });
+                this._broadcast({ ...cur, state: nextState, metric_value: c.metric_value, prev_state: cur.state });
+                transitions++;
+            } else {
+                // Heartbeat — just update last_evaluated_at
+                await this.sql`
+                    UPDATE operational_alerts
+                    SET last_evaluated_at = NOW()
+                    WHERE id = ${cur.id}
+                `;
+            }
+        }
+
+        // ── Auto-resolve stale open alerts ───────────────────────────────────
+        for (const [fp, cur] of this._openByFp) {
+            if (seenFps.has(fp)) continue;
+
+            const cooldownMs = (this._cfg[COOLDOWN_KEY[cur.alert_type]] ?? 10) * 60_000;
+            const lastEval   = cur.last_evaluated_at ? new Date(cur.last_evaluated_at) : new Date(cur.created_at);
+            const stableMs   = Date.now() - lastEval.getTime();
+
+            if (stableMs >= cooldownMs) {
+                await this._transition(cur, 'resolved', cur.metric_value, 'condition_cleared');
+                this._openByFp.delete(fp);
+                this._broadcast({ ...cur, state: 'resolved', prev_state: cur.state });
+                transitions++;
+            }
+        }
+
+        if (transitions > 0) {
+            console.log(`[AlertEngine] ${transitions} state transition(s) this cycle`);
+        }
+    }
+
+    _buildCandidates(queueState, slaScores, agents) {
+        const c     = this._cfg;
+        const items = [];
+
+        // SLA danger
         for (const s of slaScores) {
-            if (s.risk_score < 50) continue;
-            candidates.push({
+            if (s.risk_score < c['alert.sla_danger.risk_threshold']) continue;
+            items.push({
                 alert_type:       'sla_danger',
-                severity:         s.risk_score >= 75 ? 'critical' : 'warning',
+                severity:         s.risk_score >= c['alert.sla_danger.critical_threshold'] ? 'critical' : 'warning',
                 title:            `${s.package_name} SLA at risk`,
-                body:             `SLA projected to fall to ${s.projected_sla_eod}% by EOD. Risk score: ${s.risk_score}.`,
+                body:             `SLA projected ${s.projected_sla_eod}% EOD. Risk score: ${s.risk_score}.`,
                 package_name:     s.package_name,
                 agent_id:         null,
                 metric_value:     s.projected_sla_eod,
@@ -63,135 +200,209 @@ class AlertEngine {
             });
         }
 
-        // ── 2. Global queue overload ─────────────────────────────────────────
+        // Global queue overload
         const globalGrowth = queueState.global_growth_rate ?? 0;
-        if (globalGrowth > 5) {
-            candidates.push({
+        if (globalGrowth > c['alert.queue_overload.growth_warn']) {
+            items.push({
                 alert_type:       'queue_overload',
-                severity:         globalGrowth > 10 ? 'critical' : 'warning',
+                severity:         globalGrowth > c['alert.queue_overload.growth_critical'] ? 'critical' : 'warning',
                 title:            'Queue growing rapidly',
-                body:             `Global queue increasing at +${globalGrowth} chats/hr. ${queueState.global_total} pending.`,
+                body:             `+${globalGrowth} chats/hr. ${queueState.global_total} pending.`,
                 package_name:     null,
                 agent_id:         null,
                 metric_value:     globalGrowth,
-                metric_threshold: 5,
+                metric_threshold: c['alert.queue_overload.growth_warn'],
             });
         }
 
-        // ── 3. Per-agent queue overload ──────────────────────────────────────
+        // Per-agent queue overload
         for (const a of queueState.byAgent ?? []) {
-            if (a.growth_rate_per_hour <= 5) continue;
-            candidates.push({
+            if (a.growth_rate_per_hour <= c['alert.queue_overload.growth_warn']) continue;
+            items.push({
                 alert_type:       'queue_overload',
                 severity:         'warning',
                 title:            `${a.agent_name} queue growing`,
-                body:             `+${a.growth_rate_per_hour}/hr. Currently ${a.pending_count} pending.`,
+                body:             `+${a.growth_rate_per_hour}/hr. ${a.pending_count} pending.`,
                 package_name:     null,
                 agent_id:         a.agent_id,
                 metric_value:     a.growth_rate_per_hour,
-                metric_threshold: 5,
+                metric_threshold: c['alert.queue_overload.growth_warn'],
             });
         }
 
-        // ── 4. Inactive agents (idle ≥ 15 min, queue has work) ───────────────
+        // Inactive agents
+        const idleMin = c['alert.inactive_agent.idle_minutes'];
         if (queueState.global_total > 0) {
             for (const a of agents) {
-                if (a.status !== 'idle' || a.idle_minutes < 15) continue;
-                candidates.push({
+                if (a.status !== 'idle' || a.idle_minutes < idleMin) continue;
+                items.push({
                     alert_type:       'inactive_agent',
                     severity:         'warning',
-                    title:            `${a.name} idle for ${Math.round(a.idle_minutes)}m`,
-                    body:             `Agent on shift but no sessions. ${queueState.global_total} chats pending globally.`,
+                    title:            `${a.name} idle ${Math.round(a.idle_minutes)}m`,
+                    body:             `On shift but no sessions. ${queueState.global_total} chats pending.`,
                     package_name:     null,
                     agent_id:         a.id,
                     metric_value:     a.idle_minutes,
-                    metric_threshold: 15,
+                    metric_threshold: idleMin,
                 });
             }
         }
 
-        // ── 5. Agent overload (pending > 20) ─────────────────────────────────
+        // Agent overload
         for (const qa of queueState.byAgent ?? []) {
-            if (qa.pending_count <= 20) continue;
-            candidates.push({
+            if (qa.pending_count <= c['alert.agent_overload.pending_warn']) continue;
+            items.push({
                 alert_type:       'agent_overload',
-                severity:         qa.pending_count > 35 ? 'critical' : 'warning',
+                severity:         qa.pending_count > c['alert.agent_overload.pending_critical'] ? 'critical' : 'warning',
                 title:            `${qa.agent_name} overloaded`,
                 body:             `${qa.pending_count} chats pending. Growth: ${qa.growth_rate_per_hour > 0 ? '+' : ''}${qa.growth_rate_per_hour}/hr.`,
                 package_name:     null,
                 agent_id:         qa.agent_id,
                 metric_value:     qa.pending_count,
-                metric_threshold: 20,
+                metric_threshold: c['alert.agent_overload.pending_warn'],
             });
         }
 
-        // ── 6. Workload imbalance (Gini > 0.35) ──────────────────────────────
+        // Workload imbalance
         const byAgent = queueState.byAgent ?? [];
         if (byAgent.length >= 2) {
             const loads = byAgent.map(a => a.pending_count);
             const g = gini(loads);
-            if (g > 0.35) {
-                const sorted      = [...byAgent].sort((a, b) => b.pending_count - a.pending_count);
-                const overloaded  = sorted[0];
-                const underloaded = sorted[sorted.length - 1];
-                const diff        = Math.round((overloaded.pending_count - underloaded.pending_count) / 2);
-                candidates.push({
+            if (g > c['alert.workload_imbalance.gini']) {
+                const sorted     = [...byAgent].sort((a, b) => b.pending_count - a.pending_count);
+                const over       = sorted[0];
+                const under      = sorted[sorted.length - 1];
+                const diff       = Math.round((over.pending_count - under.pending_count) / 2);
+                items.push({
                     alert_type:       'workload_imbalance',
                     severity:         'warning',
                     title:            'Workload imbalance detected',
-                    body:             `Reassign ~${diff} chats from ${overloaded.agent_name} to ${underloaded.agent_name}. Gini: ${Math.round(g * 100) / 100}.`,
+                    body:             `Reassign ~${diff} chats from ${over.agent_name} → ${under.agent_name}. Gini: ${Math.round(g * 100) / 100}.`,
                     package_name:     null,
                     agent_id:         null,
                     metric_value:     Math.round(g * 100) / 100,
-                    metric_threshold: 0.35,
+                    metric_threshold: c['alert.workload_imbalance.gini'],
                 });
             }
         }
 
-        // ── Emit with deduplication ───────────────────────────────────────────
-        let emitted = 0;
-        for (const c of candidates) {
-            const ok = await this._canEmit(c.alert_type, c.package_name, c.agent_id);
-            if (!ok) continue;
-            try {
-                const [row] = await this.sql`
-                    INSERT INTO operational_alerts
-                        (severity, alert_type, title, body,
-                         package_name, agent_id, metric_value, metric_threshold)
-                    VALUES
-                        (${c.severity}, ${c.alert_type}, ${c.title}, ${c.body ?? null},
-                         ${c.package_name ?? null}, ${c.agent_id ?? null},
-                         ${c.metric_value ?? null}, ${c.metric_threshold ?? null})
-                    RETURNING *
+        return items;
+    }
+
+    // Classify metric change direction for the given alert type
+    _trend(alertType, prevValue, newValue) {
+        if (!prevValue) return 'worsening';
+        const delta = newValue - prevValue;
+        const threshold = prevValue * 0.03; // 3% noise band
+
+        // For sla_danger: lower projected_sla_eod = worse
+        if (alertType === 'sla_danger') {
+            if (delta < -threshold) return 'worsening';
+            if (delta > threshold)  return 'improving';
+            return 'stable';
+        }
+        // For everything else: higher metric = worse
+        if (delta > threshold)  return 'worsening';
+        if (delta < -threshold) return 'improving';
+        return 'stable';
+    }
+
+    async _insertAlert(candidate, fp) {
+        try {
+            const [row] = await this.sql`
+                INSERT INTO operational_alerts
+                    (severity, alert_type, title, body,
+                     package_name, agent_id, metric_value, metric_threshold,
+                     fingerprint, state, last_evaluated_at)
+                VALUES
+                    (${candidate.severity}, ${candidate.alert_type}, ${candidate.title},
+                     ${candidate.body ?? null},
+                     ${candidate.package_name ?? null}, ${candidate.agent_id ?? null},
+                     ${candidate.metric_value ?? null}, ${candidate.metric_threshold ?? null},
+                     ${fp}, 'started', NOW())
+                RETURNING *
+            `;
+            await this._logTransition(row.id, null, 'started', candidate.metric_value, 'new_condition');
+            return row;
+        } catch (err) {
+            // Unique constraint violation means another process beat us — load existing
+            if (err.code === '23505') {
+                const [existing] = await this.sql`
+                    SELECT * FROM operational_alerts WHERE fingerprint = ${fp} AND state = ANY(${[...OPEN_STATES]})
                 `;
-                this.broadcast('alert', row);
-                emitted++;
-            } catch (err) {
-                console.error('[AlertEngine] insert failed:', err.message);
+                return existing ?? null;
             }
-        }
-
-        if (emitted > 0) {
-            console.log(`[AlertEngine] emitted ${emitted} new alert(s)`);
+            console.error('[AlertEngine] insert failed:', err.message);
+            return null;
         }
     }
 
-    // Suppress if the same alert type + scope already fired in the last 15 minutes
-    async _canEmit(alertType, packageName, agentId) {
-        const rows = await this.sql`
-            SELECT id FROM operational_alerts
-            WHERE alert_type   = ${alertType}
-              AND package_name IS NOT DISTINCT FROM ${packageName ?? null}
-              AND agent_id     IS NOT DISTINCT FROM ${agentId ?? null}
-              AND auto_resolved  = FALSE
-              AND is_acknowledged = FALSE
-              AND created_at  >= NOW() - INTERVAL '15 minutes'
-            LIMIT 1
+    async _transition(cur, toState, metricValue, reason) {
+        await this.sql`
+            UPDATE operational_alerts
+            SET state             = ${toState},
+                last_evaluated_at = NOW(),
+                metric_value      = ${metricValue ?? cur.metric_value},
+                auto_resolved     = ${toState === 'resolved'},
+                resolved_at       = ${toState === 'resolved' ? new Date() : null}
+            WHERE id = ${cur.id}
         `;
-        return rows.length === 0;
+        await this._logTransition(cur.id, cur.state, toState, metricValue, reason);
     }
 
-    // Lightweight agent status query (no sessions join — just shifts + breaks)
+    async _logTransition(alertId, fromState, toState, metricValue, reason) {
+        try {
+            await this.sql`
+                INSERT INTO alert_transitions (alert_id, from_state, to_state, metric_value, reason)
+                VALUES (${alertId}, ${fromState ?? null}, ${toState}, ${metricValue ?? null}, ${reason ?? null})
+            `;
+        } catch (err) {
+            console.error('[AlertEngine] transition log failed:', err.message);
+        }
+    }
+
+    _broadcast(row) {
+        this.broadcast('alert_state', {
+            fingerprint:      row.fingerprint,
+            alert_id:         row.id,
+            state:            row.state,
+            prev_state:       row.prev_state ?? null,
+            severity:         row.severity,
+            alert_type:       row.alert_type,
+            metric_value:     row.metric_value,
+            metric_threshold: row.metric_threshold,
+            escalation_level: row.escalation_level ?? 0,
+            title:            row.title,
+            body:             row.body,
+            since:            row.created_at,
+        });
+    }
+
+    // Load all currently open alerts into the in-memory index
+    async _loadOpenAlerts() {
+        const rows = await this.sql`
+            SELECT * FROM operational_alerts
+            WHERE state = ANY(${[...OPEN_STATES]})
+              AND fingerprint IS NOT NULL
+        `;
+        this._openByFp.clear();
+        for (const r of rows) {
+            this._openByFp.set(r.fingerprint, r);
+        }
+    }
+
+    async _reloadConfig() {
+        try {
+            const rows = await this.sql`SELECT key, value FROM ops_config WHERE key LIKE 'alert.%'`;
+            for (const r of rows) {
+                const parsed = parseFloat(r.value);
+                this._cfg[r.key] = isNaN(parsed) ? r.value : parsed;
+            }
+        } catch {
+            // Table may not exist on very first startup before schema runs; use defaults
+        }
+    }
+
     async _agentStatuses() {
         const rows = await this.sql`
             WITH active_shifts AS (
@@ -221,9 +432,9 @@ class AlertEngine {
                 ls.ended_at   AS last_ended_at,
                 ls.clicked_at AS last_started_at,
                 CASE
-                    WHEN ash.agent_id IS NULL                                  THEN 'off_shift'
-                    WHEN ab.agent_id  IS NOT NULL                              THEN 'on_break'
-                    WHEN ls.ended_at IS NULL AND ls.clicked_at IS NOT NULL     THEN 'in_session'
+                    WHEN ash.agent_id IS NULL                              THEN 'off_shift'
+                    WHEN ab.agent_id  IS NOT NULL                          THEN 'on_break'
+                    WHEN ls.ended_at IS NULL AND ls.clicked_at IS NOT NULL THEN 'in_session'
                     ELSE 'idle'
                 END AS status
             FROM agents a
@@ -238,9 +449,7 @@ class AlertEngine {
             let idle_minutes = 0;
             if (r.status === 'idle') {
                 const ref = r.last_ended_at ?? r.shift_started_at;
-                idle_minutes = ref
-                    ? Math.round((now - new Date(ref).getTime()) / 60_000)
-                    : 0;
+                idle_minutes = ref ? Math.round((now - new Date(ref).getTime()) / 60_000) : 0;
             }
             return { ...r, idle_minutes };
         });

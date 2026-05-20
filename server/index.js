@@ -133,13 +133,17 @@ const { broadcast } = sseModule;
 const QueueEngine = require("./services/queue-engine");
 const queueEngine = new QueueEngine({ sql, supabase, ensureSupabaseAuth, broadcast });
 
+// Presence service — authoritative multi-signal agent presence (fixes D1)
+const { PresenceService, isEffectivelyOnShift, isAvailable } = require("./services/presence");
+const presenceService = new PresenceService({ sql });
+
 // SLA + Alert engines — depend on queueEngine, started after DB is ready
 const SlaEngine          = require("./services/sla-engine");
 const AlertEngine        = require("./services/alert-engine");
 const { ForecastingService } = require("./services/forecasting");
 const ExpressScheduler   = require("./services/express-scheduler");
-const slaEngine          = new SlaEngine({ sql, queueEngine, broadcast });
-const alertEngine        = new AlertEngine({ sql, queueEngine, slaEngine, broadcast });
+const slaEngine          = new SlaEngine({ sql, supabase, ensureSupabaseAuth, queueEngine, broadcast });
+const alertEngine        = new AlertEngine({ sql, queueEngine, slaEngine, presenceService, broadcast });
 const forecastingService = new ForecastingService({ sql });
 const expressScheduler   = new ExpressScheduler({ sql, supabase, ensureSupabaseAuth, broadcast });
 
@@ -184,50 +188,37 @@ app.get("/api/queue-state", requireAdmin, (req, res) => {
     res.json(queueEngine.getState());
 });
 
-// Operational health score — composite of queue pressure, staffing, and load
-// SLA component defaults to 100 until Phase 3 SLA engine is wired up
+// Operational health score — composite of queue pressure, staffing, load, and SLA.
+// Uses PresenceService for authoritative multi-signal agent state (fixes D1).
 app.get("/api/ops-health", requireAdmin, async (req, res) => {
     try {
-        const queueState = queueEngine.getState();
+        const queueState   = queueEngine.getState();
+        const agentPresence = await presenceService.getAll();
 
-        const agents = await sql`
-            SELECT a.id,
-                   (EXISTS(
-                       SELECT 1 FROM shifts s
-                       WHERE s.agent_id = a.id AND s.shift_ended_at IS NULL
-                   )) AS on_shift,
-                   (EXISTS(
-                       SELECT 1 FROM sessions s
-                       WHERE s.agent_id = a.id AND s.ended_at IS NULL
-                   )) AS in_session
-            FROM agents a
-            WHERE a.is_active = TRUE
-        `;
-
-        const totalAgents    = agents.length;
-        const onShift        = agents.filter(a => a.on_shift).length;
-        const inSession      = agents.filter(a => a.in_session).length;
-        const globalTotal    = queueState.global_total    || 0;
-        const growthRate     = queueState.global_growth_rate || 0;
+        const totalAgents  = agentPresence.length;
+        const onShift      = agentPresence.filter(a => isEffectivelyOnShift(a.presence)).length;
+        const inSession    = agentPresence.filter(a => a.presence === 'IN_SESSION').length;
+        const globalTotal  = queueState.global_total    || 0;
+        const growthRate   = queueState.global_growth_rate || 0;
 
         // Queue health: penalised by pending load and positive growth rate
-        const queueLoad      = Math.min(1, globalTotal / Math.max(onShift * 15, 1));
-        const growthPenalty  = growthRate > 0 ? Math.min(30, growthRate * 3) : 0;
-        const queueHealth    = Math.max(0, Math.round(100 - queueLoad * 70 - growthPenalty));
+        const queueLoad     = Math.min(1, globalTotal / Math.max(onShift * 15, 1));
+        const growthPenalty = growthRate > 0 ? Math.min(30, growthRate * 3) : 0;
+        const queueHealth   = Math.max(0, Math.round(100 - queueLoad * 70 - growthPenalty));
 
-        // Staffing health: fraction of agents currently on shift
+        // Staffing health: fraction of agents effectively on shift
         const staffingHealth = totalAgents > 0 ? Math.round((onShift / totalAgents) * 100) : 100;
 
         // Load health: agents with >20 pending chats are considered overloaded
-        const byAgent        = queueState.byAgent ?? [];
-        const overloaded     = byAgent.filter(a => a.pending_count > 20).length;
-        const loadHealth     = byAgent.length > 0
+        const byAgent    = queueState.byAgent ?? [];
+        const overloaded = byAgent.filter(a => a.pending_count > 20).length;
+        const loadHealth = byAgent.length > 0
             ? Math.max(0, Math.round(100 - (overloaded / byAgent.length) * 100))
             : 100;
 
-        // Use real SLA data from SlaEngine if available
-        const slaScores = slaEngine.getScores().filter(s => s.projected_sla_eod != null);
-        const slaHealth = slaScores.length > 0
+        // SLA health from SlaEngine
+        const slaScores  = slaEngine.getScores().filter(s => s.projected_sla_eod != null);
+        const slaHealth  = slaScores.length > 0
             ? Math.round(Math.min(...slaScores.map(s => s.projected_sla_eod)))
             : 100;
 
@@ -237,6 +228,12 @@ app.get("/api/ops-health", requireAdmin, async (req, res) => {
             staffingHealth * 0.15 +
             loadHealth     * 0.15
         );
+
+        // Presence breakdown (exposes richer state to frontend)
+        const presenceBreakdown = agentPresence.reduce((acc, a) => {
+            acc[a.presence] = (acc[a.presence] || 0) + 1;
+            return acc;
+        }, {});
 
         res.json({
             opsScore,
@@ -248,6 +245,7 @@ app.get("/api/ops-health", requireAdmin, async (req, res) => {
                 queueTotal:      globalTotal,
                 queueGrowthRate: growthRate,
             },
+            presenceBreakdown,
         });
     } catch (err) {
         res.status(500).json({ error: "Failed to compute ops health", details: err.message });
@@ -382,6 +380,11 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
         const settings = await getCachedSettings();
         const activityThresholdSeconds = (parseInt(settings.idle_warning_minutes) || 5) * 60;
 
+        // Enrich with multi-signal presence (fixes D1: on_shift count now consistent)
+        const presenceMap = new Map(
+            (await presenceService.getAll()).map(p => [p.id, p])
+        );
+
         const rows = result.map(row => {
             const onShift = !!row.shift_id;
             const hasActiveChat = !!row.current_session_id;
@@ -410,11 +413,16 @@ app.get("/api/overview", requireAdmin, async (req, res) => {
                 shift_idle_seconds = Math.max(0, shiftSec - (row.shift_active_seconds || 0) - breakSec);
             }
 
+            const pres = presenceMap.get(row.id);
+
             return {
                 id: row.id,
                 name: row.name,
                 email: row.email,
                 status,
+                // Multi-signal presence state (richer than status; used by ops-health count)
+                presence:        pres?.presence        ?? (onShift ? 'IDLE_ON_SHIFT' : 'OFF_SHIFT'),
+                presenceDetail:  pres?.presenceDetail  ?? null,
                 shift_started_at: row.shift_started_at || null,
                 current_chat_name: row.current_chat_name || null,
                 current_chat_started_at: row.current_chat_started_at || null,
@@ -1929,6 +1937,164 @@ app.listen(PORT, async () => {
         // Package-level demand breakdown per daily snapshot
         await sql`ALTER TABLE demand_snapshots ADD COLUMN IF NOT EXISTS package_breakdown JSONB DEFAULT '{}'`;
 
+        // Supabase package ID mapping (admin-configured)
+        await sql`ALTER TABLE agent_capacity_config ADD COLUMN IF NOT EXISTS supabase_package_id INTEGER`;
+
+        // ── Phase 1 — Enterprise schema additions ──────────────────────────────
+
+        // Per-room live queue state (populated by QueueEngine L2 tier)
+        await sql`
+            CREATE TABLE IF NOT EXISTS live_queue_rooms (
+                room_id             TEXT PRIMARY KEY,
+                package_name        VARCHAR(100) NOT NULL,
+                assigned_agent_id   INTEGER REFERENCES agents(id),
+                client_name         TEXT,
+                last_client_msg_at  TIMESTAMPTZ NOT NULL,
+                last_staff_msg_at   TIMESTAMPTZ,
+                sla_deadline_at     TIMESTAMPTZ NOT NULL,
+                priority_score      NUMERIC(6,3) NOT NULL DEFAULT 0,
+                state               VARCHAR(20)  NOT NULL DEFAULT 'OPEN',
+                state_changed_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                first_seen_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_lqr_state_deadline ON live_queue_rooms(state, sla_deadline_at) WHERE state IN ('OPEN','AT_RISK','URGENT')`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_lqr_agent_priority  ON live_queue_rooms(assigned_agent_id, priority_score DESC) WHERE state <> 'RESOLVED'`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_lqr_priority        ON live_queue_rooms(priority_score DESC) WHERE state <> 'RESOLVED'`;
+
+        // Per-agent live summary (updated by QueueEngine after each poll)
+        await sql`
+            CREATE TABLE IF NOT EXISTS agent_live_state (
+                agent_id               INTEGER PRIMARY KEY REFERENCES agents(id),
+                last_staff_msg_at      TIMESTAMPTZ,
+                assigned_live_count    INTEGER     NOT NULL DEFAULT 0,
+                weighted_load_per_hour NUMERIC(8,2),
+                utilization            NUMERIC(5,3),
+                concurrency_p95        NUMERIC(5,2),
+                updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `;
+
+        // Append-only operational event log (audit + replay)
+        // seq = alias of id, kept separate so callers can reference it by name
+        await sql`
+            CREATE TABLE IF NOT EXISTS ops_event_log (
+                id          BIGSERIAL   PRIMARY KEY,
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                event_type  VARCHAR(50) NOT NULL,
+                entity_type VARCHAR(20),
+                entity_id   TEXT,
+                payload     JSONB       NOT NULL DEFAULT '{}'
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_ops_event_id   ON ops_event_log(id DESC)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_ops_event_type ON ops_event_log(event_type, occurred_at DESC)`;
+
+        // Immutable SLA breach ledger
+        await sql`
+            CREATE TABLE IF NOT EXISTS sla_breach_ledger (
+                id                           BIGSERIAL    PRIMARY KEY,
+                room_id                      TEXT         NOT NULL,
+                package_name                 VARCHAR(100) NOT NULL,
+                assigned_agent_id            INTEGER,
+                sla_deadline_at              TIMESTAMPTZ  NOT NULL,
+                breached_at                  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                resolved_at                  TIMESTAMPTZ,
+                minutes_overdue_at_resolution INTEGER,
+                cause_tag                    VARCHAR(50),
+                notes                        TEXT
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_breach_ledger_room ON sla_breach_ledger(room_id, breached_at DESC)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_breach_ledger_pkg  ON sla_breach_ledger(package_name, breached_at DESC)`;
+
+        // Reassignment recommendation log
+        await sql`
+            CREATE TABLE IF NOT EXISTS reassignment_actions (
+                id                   SERIAL       PRIMARY KEY,
+                recommended_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                from_agent_id        INTEGER      REFERENCES agents(id),
+                to_agent_id          INTEGER      REFERENCES agents(id),
+                package_name         VARCHAR(100),
+                chats_recommended    INTEGER,
+                chats_actually_moved INTEGER,
+                expected_util_delta  NUMERIC(5,3),
+                actioned_by          INTEGER      REFERENCES admins(id),
+                actioned_at          TIMESTAMPTZ
+            )
+        `;
+
+        // Ops score history (written after every ops-health computation)
+        await sql`
+            CREATE TABLE IF NOT EXISTS ops_score_history (
+                id          BIGSERIAL   PRIMARY KEY,
+                computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                ops_score   SMALLINT    NOT NULL,
+                confidence  NUMERIC(4,3),
+                pillars     JSONB       NOT NULL DEFAULT '{}'
+            )
+        `;
+        await sql`CREATE INDEX IF NOT EXISTS idx_ops_score_history_time ON ops_score_history(computed_at DESC)`;
+
+        // Alert state-transition log (written by AlertEngine v2)
+        await sql`
+            CREATE TABLE IF NOT EXISTS alert_transitions (
+                id           BIGSERIAL   PRIMARY KEY,
+                alert_id     INTEGER     REFERENCES operational_alerts(id),
+                from_state   VARCHAR(20),
+                to_state     VARCHAR(20) NOT NULL,
+                metric_value NUMERIC(12,3),
+                reason       TEXT,
+                occurred_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `;
+
+        // Tunable runtime config (replaces scattered hardcoded thresholds)
+        await sql`
+            CREATE TABLE IF NOT EXISTS ops_config (
+                key         VARCHAR(80) PRIMARY KEY,
+                value       JSONB       NOT NULL,
+                description TEXT,
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `;
+        await sql`
+            INSERT INTO ops_config (key, value, description) VALUES
+                ('alert.sla_danger.risk_threshold',     '50',    'Minimum risk_score to fire sla_danger alert'),
+                ('alert.sla_danger.critical_threshold', '75',    'Risk score above which severity becomes critical'),
+                ('alert.queue_overload.growth_warn',    '5',     'Queue growth rate (chats/hr) to fire queue_overload warning'),
+                ('alert.queue_overload.growth_critical','10',    'Queue growth rate (chats/hr) for critical severity'),
+                ('alert.agent_overload.pending_warn',   '20',    'Per-agent pending count to fire agent_overload warning'),
+                ('alert.agent_overload.pending_critical','35',   'Per-agent pending count for critical severity'),
+                ('alert.inactive_agent.idle_minutes',   '15',    'Idle minutes threshold for inactive_agent alert'),
+                ('alert.workload_imbalance.gini',       '0.35',  'Gini coefficient threshold for workload_imbalance alert'),
+                ('alert.cooldown.sla_danger_min',       '10',    'Minutes stable before sla_danger auto-resolves'),
+                ('alert.cooldown.agent_overload_min',   '15',    'Minutes stable before agent_overload auto-resolves'),
+                ('alert.cooldown.queue_overload_min',   '10',    'Minutes stable before queue_overload auto-resolves'),
+                ('alert.cooldown.inactive_agent_min',   '5',     'Minutes stable before inactive_agent auto-resolves'),
+                ('alert.cooldown.workload_imbalance_min','20',   'Minutes stable before workload_imbalance auto-resolves'),
+                ('alert.escalate.sla_danger_min',       '20',    'Minutes worsening before sla_danger escalates'),
+                ('alert.escalate.agent_overload_min',   '30',    'Minutes worsening before agent_overload escalates'),
+                ('alert.escalate.queue_overload_min',   '15',    'Minutes worsening before queue_overload escalates'),
+                ('queue.priority_weights',              '[0.20,0.40,0.15,0.20,0.05]', 'Weights: [PackagePriority, TTB_Urgency, AgingPenalty, PremiumBoost, ReopenPenalty]'),
+                ('presence.idle_warning_minutes',       '10',    'Minutes without activity before agent is considered idle'),
+                ('presence.responding_window_minutes',  '10',    'Minutes lookback for RESPONDING state')
+            ON CONFLICT (key) DO NOTHING
+        `;
+
+        // ALTER operational_alerts to support state-machine lifecycle (AlertEngine v2)
+        await sql`ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS fingerprint       TEXT`;
+        await sql`ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS state             VARCHAR(20) NOT NULL DEFAULT 'started'`;
+        await sql`ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS last_evaluated_at TIMESTAMPTZ`;
+        await sql`ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS escalation_level  SMALLINT    NOT NULL DEFAULT 0`;
+        await sql`ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS snooze_until      TIMESTAMPTZ`;
+        await sql`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_open_fingerprint
+            ON operational_alerts(fingerprint)
+            WHERE state IN ('started','worsening','stable','improving','escalated')
+        `;
+
         // Seed default admin
         const existingAdmin = await sql`SELECT id FROM admins WHERE email = 'admin@fitstn.com'`;
         if (existingAdmin.length === 0) {
@@ -1972,6 +2138,9 @@ app.listen(PORT, async () => {
                 console.error("Auto demand snapshot failed:", err.message);
             }
         }, SNAPSHOT_INTERVAL_MS);
+
+        // Presence view — depends on agent_live_state existing
+        await presenceService.createView();
 
         // Queue engine — polls Supabase every 60 s and broadcasts via SSE
         queueEngine.start();
