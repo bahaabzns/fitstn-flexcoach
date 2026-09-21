@@ -112,77 +112,15 @@ module.exports = function (requireAdmin) {
         return null;
     }
 
+    // Supabase requests disabled — see request to remove all FlexCoach requests entirely.
     async function fetchFlexCoachRooms() {
-        const BATCH_SIZE = 500;
-        const MAX_BATCHES = 10;
-        let allRooms = [];
-
-        for (let batch = 0; batch < MAX_BATCHES; batch++) {
-            const offset = batch * BATCH_SIZE;
-            const { data: chatRooms, error } = await supabase.rpc("get_chat_rooms_paginated", {
-                p_assigned_staff_id: null,
-                p_client_gender: null,
-                p_coach_id: null,
-                p_ghost_days: 3,
-                p_ghost_only: false,
-                p_last_interaction: null,
-                p_last_interaction_from: null,
-                p_last_interaction_to: null,
-                p_last_message_from: null,
-                p_limit: BATCH_SIZE,
-                p_no_assigned_staff: false,
-                p_offset: offset,
-                p_package_id: null,
-                p_search: null,
-                p_staff_id: "31fe5cc1-3e32-4096-b678-367e5a48e7d5",
-                p_subscription_start_date: null,
-                p_subscription_start_weekday: null,
-                p_subscription_status: null,
-                p_subscription_t_status: null,
-                p_tenant_id: "fitstn",
-                p_unread_only: false,
-            });
-            if (error) break;
-            allRooms.push(...chatRooms.rooms);
-            if (chatRooms.rooms.length < BATCH_SIZE) break;
-        }
-        return allRooms;
+        return [];
     }
 
     // ── Group room partner lookup ──
+    // Supabase requests disabled — see request to remove all FlexCoach requests entirely.
     async function fetchGroupRoomPartners(groupRoomIds) {
-        const { data: members, error } = await supabase
-            .from("chat_room_members")
-            .select("room_id, client_id")
-            .in("room_id", groupRoomIds)
-            .not("client_id", "is", null);
-
-        if (error) return {};
-
-        const clientIds = [...new Set(members.map(m => m.client_id))];
-        if (clientIds.length === 0) return {};
-
-        const { data: clients, error: clientError } = await supabase
-            .from("clients")
-            .select("id, code")
-            .in("id", clientIds);
-
-        if (clientError) return {};
-
-        const clientCodeById = {};
-        for (const c of clients) {
-            clientCodeById[c.id] = c.code?.toString();
-        }
-
-        const partnersByRoom = {};
-        for (const m of members) {
-            const code = clientCodeById[m.client_id];
-            if (!code) continue;
-            if (!partnersByRoom[m.room_id]) partnersByRoom[m.room_id] = [];
-            partnersByRoom[m.room_id].push(code);
-        }
-
-        return partnersByRoom;
+        return {};
     }
 
     // ── Mapping ──

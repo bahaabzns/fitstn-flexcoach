@@ -18,6 +18,14 @@ async function ensureSupabaseAuth() {
     return;
 }
 
+// All FlexCoach/Supabase RPC requests disabled — see request to remove all
+// FlexCoach requests entirely. Every caller (queue-engine, sla-engine,
+// express-scheduler, demand-report, and the routes below) shares this one
+// client, so stubbing .rpc here cuts the network call at the source instead
+// of patching each call site. Chrome extension routes never touch this
+// client — they read/write Postgres directly — so they're unaffected.
+supabase.rpc = async () => ({ data: null, error: { message: "FlexCoach requests are disabled" } });
+
 // Checks if a client's room is in the "waiting for agent" queue
 // Returns "client" or "staff" — whichever side sent the last message in this chat
 async function fetchLastMessageSide(chatName) {
@@ -2558,20 +2566,24 @@ app.listen(PORT, async () => {
         // Presence view — depends on agent_live_state existing
         await presenceService.createView();
 
-        // Queue engine — polls Supabase every 60 s and broadcasts via SSE
-        queueEngine.start();
+        // Queue engine — DISABLED. It exists solely to poll Supabase (L1/L2/L3);
+        // all FlexCoach requests are being removed entirely, so it's not started.
+        // queueEngine.start();
 
-        // SLA engine — computes per-package risk scores every 15 min
-        slaEngine.start();
+        // SLA engine — DISABLED. Its per-package scoring polls Supabase directly.
+        // slaEngine.start();
 
-        // Alert engine — evaluates rules every 5 min, writes to operational_alerts
+        // Alert engine — evaluates rules every 5 min, writes to operational_alerts.
+        // Reads only queueEngine/slaEngine in-memory state (no Supabase calls of
+        // its own), so it's left running; it'll just see empty/default state now.
         alertEngine.start();
 
-        // Forecasting service — seeds models immediately then reruns nightly at midnight
+        // Forecasting service — seeds models immediately then reruns nightly at midnight.
+        // Postgres-only, no Supabase dependency — unaffected.
         forecastingService.start();
 
-        // Express scheduler — snapshots Fit Express rooms daily at 11:00 local
-        expressScheduler.start();
+        // Express scheduler — DISABLED. Its daily snapshot job calls Supabase directly.
+        // expressScheduler.start();
 
         // Premium protection — watches Pro rooms with < 30m to deadline, escalates if agent is idle/off-shift
         premiumProtection.start();
