@@ -107,13 +107,9 @@ module.exports = function (requireAdmin) {
     }
 
     // ── FlexCoach helpers ──
+    // Supabase password login disabled — see request to stop all Supabase sign-in attempts.
     async function authenticateFlexCoach() {
-        const { data, error } = await supabase.auth.signInWithPassword({
-            email: supabaseEmail,
-            password: supabasePassword,
-        });
-        if (error) throw new Error("FlexCoach auth failed: " + error.message);
-        return data.session.access_token;
+        return null;
     }
 
     async function fetchFlexCoachRooms() {
@@ -354,17 +350,7 @@ module.exports = function (requireAdmin) {
                 });
             }
 
-            const accessToken = (await supabase.auth.getSession()).data.session.access_token;
-            const injectionResult = await injectAssignments(mapped, accessToken);
-
-            res.json({
-                dryRun: false,
-                crmClientsCount: crmItems.length,
-                flexRoomsCount: flexRooms.length,
-                matched,
-                unmatched,
-                ...injectionResult,
-            });
+            throw new Error("Supabase login is disabled — assignment injection requires an authenticated session.");
         } catch (err) {
             res.status(500).json({ error: "Staff assignator failed", details: err.message });
         }

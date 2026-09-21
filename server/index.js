@@ -13,14 +13,9 @@ const supabase = createClient(
 );
 let supabaseAuthenticated = false;
 
+// Supabase password login disabled — see request to stop all Supabase sign-in attempts.
 async function ensureSupabaseAuth() {
-    if (supabaseAuthenticated) return;
-    const { error } = await supabase.auth.signInWithPassword({
-        email: process.env.SUPABASE_USER_EMAIL,
-        password: process.env.SUPABASE_USER_PASSWORD,
-    });
-    if (error) throw new Error("Supabase auth failed: " + error.message);
-    supabaseAuthenticated = true;
+    return;
 }
 
 // Checks if a client's room is in the "waiting for agent" queue
